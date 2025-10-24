@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\DemoPriceController;
 use App\Http\Controllers\CatalogController;
 use App\Http\Controllers\CartController;
+use App\Http\Controllers\CheckoutController;
+
 Route::get('/', function () {
     return view('welcome');
 });
@@ -26,4 +28,9 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
+Route::middleware(['auth'])->group(function () {
+    Route::get('/checkout', [CheckoutController::class, 'show'])->name('checkout.show');
+    Route::post('/checkout/place', [CheckoutController::class, 'place'])->name('checkout.place');
+    Route::post('/checkout/upload-voucher', [CheckoutController::class, 'uploadVoucher'])->name('checkout.voucher');
+});
 require __DIR__ . '/auth.php';
