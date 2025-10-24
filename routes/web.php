@@ -4,10 +4,15 @@ use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\DemoPriceController;
 use App\Http\Controllers\CatalogController;
-
+use App\Http\Controllers\CartController;
 Route::get('/', function () {
     return view('welcome');
 });
+
+Route::post('/cart/add', [CartController::class, 'add'])->name('cart.add');
+Route::get('/cart', [CartController::class, 'index'])->name('cart.index');
+Route::post('/cart/update', [CartController::class, 'update'])->name('cart.update');
+Route::post('/cart/remove', [CartController::class, 'remove'])->name('cart.remove');
 Route::get('/catalogo', [CatalogController::class, 'index']);
 Route::get('/producto/{slug}', [CatalogController::class, 'show']);
 Route::get('/demo-precios', [DemoPriceController::class, 'index'])->middleware(['auth']);

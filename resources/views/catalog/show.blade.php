@@ -7,30 +7,50 @@
             <img src="{{ optional($product->media->firstWhere('color_id', optional($variant)->color_id))?->url ?? $product->media->first()->url ?? 'https://via.placeholder.com/500x500' }}" class="w-full" />
         </div>
         <div>
-            <div class="mb-4">Precio: <strong>S/ {{ number_format($price,2) }}</strong> <span class="text-xs text-gray-500">(origen: {{ $source }})</span></div>
+            <div class="mb-2 text-sm text-gray-500">Origen precio: <em>{{ $source }}</em></div>
+            <div class="mb-4 text-2xl">S/ {{ number_format($price,2) }}</div>
 
 
             <form method="GET" action="">
                 <div class="mb-4">
                     <label class="block text-sm mb-1">Color</label>
                     <select name="color" class="border p-2 w-full" onchange="this.form.submit()">
-                        @foreach($product->variants->groupBy('color.name') as $colorName => $variantsByColor)
-                        <option value="{{ $variantsByColor->first()->color_id }}" @selected($variantsByColor->contains('id', optional($variant)->id))>{{ $colorName }}</option>
+                        @php $currentColorId = optional($variant)->color_id; @endphp
+                        @foreach($product->variants->groupBy('color.id') as $cId => $variantsByColor)
+                        <option value="{{ $cId }}" @selected($currentColorId==$cId)>
+                            {{ $variantsByColor->first()->color->name }}
+                        </option>
                         @endforeach
                     </select>
                 </div>
                 <div class="mb-4">
                     <label class="block text-sm mb-1">Talla</label>
                     <select name="size" class="border p-2 w-full" onchange="this.form.submit()">
-                        @foreach($product->variants->groupBy('size.code') as $sizeCode => $variantsBySize)
-                        <option value="{{ $variantsBySize->first()->size_id }}" @selected($variantsBySize->contains('id', optional($variant)->id))>{{ $sizeCode }}</option>
+                        @php $currentSizeId = optional($variant)->size_id; @endphp
+                        @foreach($product->variants->groupBy('size.id') as $sId => $variantsBySize)
+                        <option value="{{ $sId }}" @selected($currentSizeId==$sId)>
+                            {{ $variantsBySize->first()->size->code }}
+                        </option>
                         @endforeach
                     </select>
                 </div>
             </form>
 
 
-            <div class="text-sm text-gray-600">Stock: <strong>{{ optional($variant)->stock ?? 0 }}</strong></div>
+            <div class="text-sm text-gray-600 mb-4">Stock disponible: <strong>{{ optional($variant)->stock ?? 0 }}</strong></div>
+
+
+            @if(optional($variant)->stock > 0)
+            <form method="POST" action="{{ route('cart.add') }}" class="flex items-center gap-3">
+                @csrf
+                <input type="hidden" name="product_id" value="{{ $product->id }}">
+                <input type="hidden" name="variant_id" value="{{ optional($variant)->id }}">
+                <input type="number" name="qty" value="1" min="1" max="{{ optional($variant)->stock ?? 1 }}" class="border p-2 w-24">
+                <button class="bg-blue-600 text-white px-4 py-2 rounded">Añadir al carrito</button>
+            </form>
+            @else
+            <div class="text-red-600">Sin stock</div>
+            @endif
         </div>
     </div>
 </x-app-layout>
