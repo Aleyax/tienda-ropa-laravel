@@ -6,7 +6,7 @@ use App\Http\Controllers\DemoPriceController;
 use App\Http\Controllers\CatalogController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CheckoutController;
-
+use App\Http\Controllers\Admin\OrderController as AdminOrderController;
 Route::get('/', function () {
     return view('welcome');
 });
@@ -33,4 +33,12 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/checkout/place', [CheckoutController::class, 'place'])->name('checkout.place');
     Route::post('/checkout/upload-voucher', [CheckoutController::class, 'uploadVoucher'])->name('checkout.voucher');
 });
+
+Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () {
+    Route::get('/orders', [AdminOrderController::class, 'index'])->name('orders.index');
+    Route::get('/orders/{order}', [AdminOrderController::class, 'show'])->name('orders.show');
+    Route::post('/orders/{order}/status', [AdminOrderController::class, 'updateStatus'])->name('orders.status');
+    Route::post('/orders/{order}/paystatus', [AdminOrderController::class, 'updatePaymentStatus'])->name('orders.paystatus');
+});
+
 require __DIR__ . '/auth.php';
