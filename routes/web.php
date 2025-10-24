@@ -35,16 +35,31 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/checkout/upload-voucher', [CheckoutController::class, 'uploadVoucher'])->name('checkout.voucher');
 });
 
+
+
 Route::middleware(['auth', 'permission:orders.view'])
     ->prefix('admin')->name('admin.')->group(function () {
-        Route::get('/orders', [AdminOrderController::class, 'index'])->name('orders.index');            // orders.view
-        Route::get('/orders/{order}', [AdminOrderController::class, 'show'])->name('orders.show');       // orders.view
+
+        // Listado y export
+        Route::get('/orders', [AdminOrderController::class, 'index'])->name('orders.index');
+        Route::get('/orders/export', [AdminOrderController::class, 'export'])->name('orders.export');
+
+        // Acciones MASIVAS
+        Route::post('/orders/bulk-status', [AdminOrderController::class, 'bulkStatus'])
+            ->middleware('permission:orders.update')->name('orders.bulkStatus');
+
+        Route::post('/orders/bulk-paystatus', [AdminOrderController::class, 'bulkPayStatus'])
+            ->middleware('permission:payments.validate')->name('orders.bulkPayStatus');
+
+        // 🔹 Acciones INDIVIDUALES (necesarias para show.blade.php)
         Route::post('/orders/{order}/status', [AdminOrderController::class, 'updateStatus'])
-            ->middleware('permission:orders.update')->name('orders.status');                          // orders.update
+            ->middleware('permission:orders.update')->name('orders.status');
+
         Route::post('/orders/{order}/paystatus', [AdminOrderController::class, 'updatePaymentStatus'])
-            ->middleware('permission:payments.validate')->name('orders.paystatus');                   // payments.validate
+            ->middleware('permission:payments.validate')->name('orders.paystatus');
+
+        // Detalle
+        Route::get('/orders/{order}', [AdminOrderController::class, 'show'])->name('orders.show');
     });
-
-
 
 require __DIR__ . '/auth.php';
