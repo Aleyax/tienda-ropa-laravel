@@ -23,6 +23,7 @@ class DatabaseSeeder extends Seeder
             ColorSeeder::class,
             SizeSeeder::class,
             CatalogSeeder::class,
+            RolesSeeder::class,
         ]);
     }
 }
