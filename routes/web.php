@@ -20,6 +20,8 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+
+
 /*
 |--------------------------------------------------------------------------
 | Catálogo / Carrito / Precios demo
@@ -81,32 +83,30 @@ Route::middleware('auth')->group(function () {
 | Nota: usa el middleware de permisos que ya configuraste con Spatie.
 |       Todo va en UN solo grupo para evitar duplicados.
 */
-Route::middleware(['auth', 'permission:orders.view'])
+Route::middleware(['auth'])
     ->prefix('admin')->name('admin.')
     ->group(function () {
 
-        // -------- Pedidos: listado / export
-        Route::get('/orders',                [OrderController::class, 'index'])->name('orders.index');
-        Route::get('/orders/export',         [OrderController::class, 'export'])->name('orders.export');
+        // -------- Pedidos (con permisos propios)
+        Route::middleware('permission:orders.view')->group(function () {
+            Route::get('/orders',                [OrderController::class, 'index'])->name('orders.index');
+            Route::get('/orders/export',         [OrderController::class, 'export'])->name('orders.export');
+            Route::get('/orders/{order}',        [OrderController::class, 'show'])->name('orders.show');
+        });
 
-        // -------- Acciones MASIVAS
-        Route::post('/orders/bulk-status',   [OrderController::class, 'bulkStatus'])
+        Route::post('/orders/bulk-status',      [OrderController::class, 'bulkStatus'])
             ->middleware('permission:orders.update')->name('orders.bulkStatus');
 
-        Route::post('/orders/bulk-paystatus', [OrderController::class, 'bulkPayStatus'])
+        Route::post('/orders/bulk-paystatus',   [OrderController::class, 'bulkPayStatus'])
             ->middleware('permission:payments.validate')->name('orders.bulkPayStatus');
 
-        // -------- Acciones INDIVIDUALES
-        Route::post('/orders/{order}/status',    [OrderController::class, 'updateStatus'])
+        Route::post('/orders/{order}/status',   [OrderController::class, 'updateStatus'])
             ->middleware('permission:orders.update')->name('orders.status');
 
         Route::post('/orders/{order}/paystatus', [OrderController::class, 'updatePaymentStatus'])
             ->middleware('permission:payments.validate')->name('orders.paystatus');
 
-        // -------- Detalle (usa el show de OrderController)
-        Route::get('/orders/{order}', [OrderController::class, 'show'])->name('orders.show');
-
-        // -------- Liquidación de envío (métodos en AdminOrderController)
+        // Liquidación de envío
         Route::post('/orders/{order}/shipping-actual', [AdminOrderController::class, 'saveShippingActual'])
             ->middleware('permission:orders.update')->name('orders.shippingActual');
 
@@ -115,6 +115,35 @@ Route::middleware(['auth', 'permission:orders.view'])
 
         Route::post('/orders/{order}/settlement/charge', [AdminOrderController::class, 'settlementCharge'])
             ->middleware('permission:payments.validate')->name('orders.settlement.charge');
+
+        /* ============================
+        |  Productos (permisos propios)
+        ============================ */
+        Route::middleware('permission:products.view')->group(function () {
+            Route::get('/products', [ProductController::class, 'index'])->name('products.index');
+        });
+
+        Route::middleware('permission:products.create')->group(function () {
+            Route::get('/products/create', [ProductController::class, 'create'])->name('products.create');
+            Route::post('/products',        [ProductController::class, 'store'])->name('products.store');
+        });
+
+        Route::middleware('permission:products.update')->group(function () {
+            Route::get('/products/{product}/edit', [ProductController::class, 'edit'])->name('products.edit');
+            Route::put('/products/{product}',       [ProductController::class, 'update'])->name('products.update');
+
+            Route::post('/products/{product}/variants', [ProductVariantController::class, 'store'])->name('variants.store');
+            Route::put('/variants/{variant}',           [ProductVariantController::class, 'update'])->name('variants.update');
+            Route::delete('/variants/{variant}',        [ProductVariantController::class, 'destroy'])->name('variants.destroy');
+
+            Route::post('/products/{product}/media', [MediaController::class, 'store'])->name('media.store');
+            Route::delete('/media/{media}',          [MediaController::class, 'destroy'])->name('media.destroy');
+        });
+
+        Route::delete('/products/{product}', [ProductController::class, 'destroy'])
+            ->name('products.destroy')
+            ->middleware('permission:products.delete');
     });
+
 
 require __DIR__ . '/auth.php';
