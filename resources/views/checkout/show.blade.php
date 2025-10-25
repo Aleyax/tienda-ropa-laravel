@@ -172,7 +172,8 @@
                     <input type="hidden" name="shipping_mode" value="{{ $shippingMode }}">
                     @if($shippingMode === 'deposit')
                     <input type="hidden" name="shipping_address_id" value="{{ $addressId }}">
-                    <input type="hidden" name="shipping_deposit" value="{{ old('shipping_deposit', $shippingAmount ?: $depositDefault) }}">
+                    <input type="hidden" name="shipping_deposit"
+                        value="{{ old('shipping_deposit', $shippingAmount ?: $depositDefault) }}">
                     @endif
 
                     <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">

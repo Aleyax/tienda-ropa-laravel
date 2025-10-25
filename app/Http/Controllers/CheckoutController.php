@@ -140,11 +140,10 @@ class CheckoutController extends Controller
 
         // 2) Validaciones de entrada
         $data = $request->validate([
-            'payment_method'      => 'required|in:transfer,cod,online',
-            'shipping_mode'       => 'required|in:pickup,deposit,to_be_quoted',
-            'shipping_address_id' => 'nullable|integer',
-            'shipping_deposit'    => 'nullable|numeric|min:0',
-            // extras de COD si quieres validar: 'cod_pay_type' => 'nullable|in:cash,yape,plin'
+            'payment_method'       => 'required|in:transfer,cod,online',
+            'shipping_mode'        => 'required|in:pickup,deposit,to_be_quoted',
+            'shipping_address_id'  => 'required_if:shipping_mode,deposit|integer|exists:addresses,id',
+            'shipping_deposit'     => 'required_if:shipping_mode,deposit|numeric|min:0',
         ]);
 
         $shippingMode      = $data['shipping_mode'];
