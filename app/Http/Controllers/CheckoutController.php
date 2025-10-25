@@ -1,6 +1,7 @@
 <?php
 
 namespace App\Http\Controllers;
+
 use App\Models\User;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -12,8 +13,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Filesystem\FilesystemAdapter;
+use App\Models\Address;
 use Illuminate\Support\Str;
 use App\Models\ShippingZone;
+
 class CheckoutController extends Controller
 {
     public function show(Request $request, PricingService $pricing)
@@ -46,7 +49,7 @@ class CheckoutController extends Controller
         $total = round($subtotal + $igv, 2);
 
         // --- Nuevos: Envío / Recojo ---
-          /** @var User|null $user */
+        /** @var User|null $user */
         $user      = Auth::user();
         $addresses = $user ? $user->addresses()->orderByDesc('is_default')->get() : collect();
 
@@ -100,78 +103,141 @@ class CheckoutController extends Controller
     }
     public function place(Request $request, PricingService $pricing)
     {
-        $data = $request->validate([
-            'payment_method' => 'required|in:transfer,cod,online',
-            'cod_pay_type'   => 'nullable|in:cash,yape,plin',
-            'cod_change'     => 'nullable|string|max:20',
-        ]);
+        $user = Auth::user();
 
+        // 1) Recalcular carrito (idéntico a show)
         $cart = session('cart', []);
-        if (empty($cart)) return redirect()->route('cart.index');
+        if (empty($cart)) {
+            return redirect()->route('cart.index')->with('error', 'Tu carrito está vacío.');
+        }
 
-        // Totales
-        $subtotal = $igv = $total = 0;
-        $items = [];
+        $lines = [];
+        $subtotal = 0;
         foreach ($cart as $line) {
             $product = Product::findOrFail($line['product_id']);
             $variant = ProductVariant::findOrFail($line['variant_id']);
-            [$price, $source] = method_exists($pricing, 'priceForWithSource')
-                ? $pricing->priceForWithSource(Auth::user(), $product, $variant->id)
-                : [$pricing->priceFor(Auth::user(), $product, $variant->id), 'auto'];
-            $amount = $price * $line['qty'];
+
+            [$price] = method_exists($pricing, 'priceForWithSource')
+                ? $pricing->priceForWithSource($user, $product, $variant->id)
+                : [$pricing->priceFor($user, $product, $variant->id)];
+
+            $amount   = $price * $line['qty'];
             $subtotal += $amount;
-            $items[] = compact('product', 'variant', 'price', 'source') + ['qty' => $line['qty'], 'amount' => $amount];
+
+            $lines[] = compact('product', 'variant') + [
+                'qty'    => $line['qty'],
+                'price'  => $price,
+                'amount' => $amount,
+            ];
         }
-        $igv = round($subtotal * 0.18, 2);
+        $igv   = round($subtotal * 0.18, 2);
         $total = round($subtotal + $igv, 2);
 
-        // Crear Order
-        $order = Order::create([
-            'user_id'        => Auth::id(),
-            'payment_method' => $data['payment_method'],
-            'payment_status' => $data['payment_method'] === 'transfer' ? 'pending_confirmation'
-                : ($data['payment_method'] === 'cod' ? 'cod_promised' : 'authorized'),
-            'status'         => 'new',
-            'subtotal'       => $subtotal,
-            'tax'            => $igv,
-            'total'          => $total,
-            'cod_details'    => $data['payment_method'] === 'cod'
-                ? ['pay_type' => $data['cod_pay_type'], 'change' => $data['cod_change']]
-                : null,
+        // 2) Validaciones de entrada
+        $data = $request->validate([
+            'payment_method'      => 'required|in:transfer,cod,online',
+            'shipping_mode'       => 'required|in:pickup,deposit,to_be_quoted',
+            'shipping_address_id' => 'nullable|integer',
+            'shipping_deposit'    => 'nullable|numeric|min:0',
+            // extras de COD si quieres validar: 'cod_pay_type' => 'nullable|in:cash,yape,plin'
         ]);
 
-        foreach ($items as $it) {
+        $shippingMode      = $data['shipping_mode'];
+        $shippingAddressId = null;
+        $shippingZoneId    = null;
+        $shippingRateId    = null;
+        $shippingEstimated = null;
+        $shippingDeposit   = 0.0;
+        $shippingAmount    = 0.0;   // lo que se cobra HOY
+        $settlementStatus  = 'unsettled';
+
+        // 3) Lógica por modo logístico
+        if ($shippingMode === 'pickup') {
+            // Recojo en tienda: no hay dirección ni envío hoy
+            $settlementStatus = 'settled';
+            $shippingAmount   = 0.0;
+        } elseif ($shippingMode === 'to_be_quoted') {
+            // Por cotizar: no cobras envío hoy
+            $shippingAmount   = 0.0;
+            $settlementStatus = 'unsettled';
+        } else { // deposit
+            // Debe venir una dirección del usuario
+            $address = Address::where('user_id', $user->id)
+                ->findOrFail($data['shipping_address_id']);
+
+            // Buscar zona por distrito (si la tienes configurada)
+            $zone = ShippingZone::findByDistrict($address->district);
+            $rate = $zone?->rates()->orderBy('price')->first();
+
+            $shippingAddressId = $address->id;
+            $shippingZoneId    = $zone?->id;
+            $shippingRateId    = $rate?->id;
+            $shippingEstimated = $rate?->price ?? null;
+
+            // Depósito editable desde el GET
+            $shippingDeposit = (float)($data['shipping_deposit'] ?? 0);
+            $shippingAmount  = $shippingDeposit; // lo cobrado hoy
+            $settlementStatus = 'unsettled';
+        }
+
+        $grandTotal = round($total + $shippingAmount, 2);
+
+        // 4) Crear orden
+        $order = Order::create([
+            'user_id'                   => $user->id,
+            'subtotal'                  => $subtotal,
+            'tax'                       => $igv,
+            'total'                     => $total,
+
+            'shipping_mode'             => $shippingMode,
+            'shipping_address_id'       => $shippingAddressId,
+            'shipping_zone_id'          => $shippingZoneId,
+            'shipping_rate_id'          => $shippingRateId,
+            'shipping_estimated'        => $shippingEstimated,
+            'shipping_deposit'          => $shippingDeposit,
+            'shipping_actual'           => null,
+            'shipping_amount'           => $shippingAmount,
+            'grand_total'               => $grandTotal,
+
+            'shipping_settlement_status' => $settlementStatus,
+
+            'status'                    => 'new',
+            'payment_method'            => $data['payment_method'],
+            'payment_status'            => $data['payment_method'] === 'online' ? 'authorized' : 'unpaid',
+        ]);
+
+        // 5) Guardar ítems (ajusta a tu OrderItem)
+        foreach ($lines as $l) {
             OrderItem::create([
-                'order_id'     => $order->id,
-                'product_id'   => $it['product']->id,
-                'variant_id'   => $it['variant']->id,
-                'qty'          => $it['qty'],
-                'unit_price'   => $it['price'],
-                'amount'       => $it['amount'],
-                'price_source' => $it['source'],
+                'order_id'      => $order->id,
+                'product_id'    => $l['product']->id,
+                'variant_id'    => $l['variant']->id,
+                'name'          => $l['product']->name,
+                'sku'           => $l['variant']->sku,
+                'unit_price' => $l['price'],
+                'qty'           => $l['qty'],
+                'amount'        => $l['amount'],
             ]);
         }
 
-        // Registrar pago (inicial)
+        // 6) Registrar pago "inicial" (opcional, según tu flujo)
+        //    Si manejas un solo pago por grand_total al confirmar:
         OrderPayment::create([
-            'order_id'    => $order->id,
-            'method'      => $data['payment_method'],
-            'amount'      => $total,
-            'status'      => $data['payment_method'] === 'online' ? 'pending' : 'pending',
+            'order_id'   => $order->id,
+            'method'     => $data['payment_method'], // transfer/cod/online
+            'kind'       => 'charge',                // cargo normal
+            'amount'     => $grandTotal,
+            'status'     => $data['payment_method'] === 'online' ? 'authorized' : 'pending',
+            'notes'      => $data['payment_method'] === 'cod' ? ($request->input('cod_pay_type') ?? null) : null,
         ]);
 
-        // Simulación de cada método
-        if ($data['payment_method'] === 'online') {
-            // Sandbox: marcamos como pagado inmediato (simulado)
-            $order->update(['payment_status' => 'paid', 'paid_at' => now()]);
-            $order->payments()->latest()->first()->update(['status' => 'validated', 'provider_ref' => 'SIMULATED-OK']);
-        }
-
-        // Vaciar carrito
+        // 7) Vaciar carrito
         session()->forget('cart');
 
-        return redirect()->route('checkout.show')->with('success', 'Pedido creado #' . $order->id . ' (estado pago: ' . $order->payment_status . ')');
+        // 8) Redirigir a gracias (o detalle de pedido)
+        return redirect()->route('checkout.thanks', $order)->with('success', 'Pedido creado correctamente.');
     }
+
 
     public function uploadVoucher(Request $request)
     {
