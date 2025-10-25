@@ -34,21 +34,36 @@ class AddressController extends Controller
             'district'     => 'required|string|max:100',
             'line1'        => 'required|string|max:255',
             'reference'    => 'nullable|string|max:255',
+            'is_default'   => 'sometimes|boolean',
         ]);
 
-        /** @var User $user */
+        /** @var \App\Models\User $user */
         $user = $request->user();
 
-        $validated['user_id'] = $user->id;  // 👈 ya no marca “id” indefinido
-        // si no tiene ninguna, esta queda como predeterminada
-        if (!$user->addresses()->exists()) {
+        $validated['user_id'] = $user->id;
+        if (!$user->addresses()->exists() || $request->boolean('is_default')) {
             $validated['is_default'] = true;
         }
 
-        Address::create($validated);
+        $address = \App\Models\Address::create($validated);
 
-        return back()->with('success', 'Dirección guardada correctamente.');
+        // ✅ Si el cliente pide JSON (AJAX), devolvemos JSON
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'ok'      => true,
+                'address' => [
+                    'id'       => $address->id,
+                    'label'    => "{$address->district} — {$address->line1} ({$address->contact_name})",
+                    'district' => $address->district,
+                    'default'  => (bool) $address->is_default,
+                ],
+            ]);
+        }
+
+        // Fallback: navegación normal
+        return redirect()->back()->with('success', 'Dirección guardada correctamente.');
     }
+
 
     // Eliminar dirección (solo del usuario dueño)
     public function destroy(Request $request, Address $address)

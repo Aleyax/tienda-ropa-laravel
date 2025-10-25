@@ -12,4 +12,8 @@ class ShippingZone extends Model
     {
         return $this->hasMany(ShippingRate::class);
     }
+    public static function findByDistrict(string $district): ?self
+    {
+        return static::whereJsonContains('districts', $district)->first();
+    }
 }

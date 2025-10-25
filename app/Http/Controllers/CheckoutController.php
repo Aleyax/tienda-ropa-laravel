@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers;
-
+use App\Models\User;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderPayment;
@@ -13,39 +13,91 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Str;
-
+use App\Models\ShippingZone;
 class CheckoutController extends Controller
 {
-    public function show(PricingService $pricing)
+    public function show(Request $request, PricingService $pricing)
     {
         $cart = session('cart', []);
         if (empty($cart)) return redirect()->route('cart.index');
 
-        // Recalcular totales
+        // --- Recalcular líneas y totales (tu lógica actual) ---
         $lines = [];
         $subtotal = 0;
         foreach ($cart as $line) {
             $product = Product::find($line['product_id']);
             $variant = ProductVariant::find($line['variant_id']);
+
             [$price, $source] = method_exists($pricing, 'priceForWithSource')
                 ? $pricing->priceForWithSource(Auth::user(), $product, $variant->id)
                 : [$pricing->priceFor(Auth::user(), $product, $variant->id), 'auto'];
 
-            $amount = $price * $line['qty'];
+            $amount   = $price * $line['qty'];
             $subtotal += $amount;
+
             $lines[] = compact('product', 'variant') + [
-                'qty' => $line['qty'],
-                'price' => $price,
+                'qty'    => $line['qty'],
+                'price'  => $price,
                 'amount' => $amount,
-                'source' => $source
+                'source' => $source,
             ];
         }
-        $igv = round($subtotal * 0.18, 2);
+        $igv   = round($subtotal * 0.18, 2);
         $total = round($subtotal + $igv, 2);
 
-        return view('checkout.show', compact('lines', 'subtotal', 'igv', 'total'));
-    }
+        // --- Nuevos: Envío / Recojo ---
+          /** @var User|null $user */
+        $user      = Auth::user();
+        $addresses = $user ? $user->addresses()->orderByDesc('is_default')->get() : collect();
 
+        // pickup | deposit | to_be_quoted
+        $shippingMode = $request->input('shipping_mode', 'pickup');
+        $addressId    = (int) $request->input('shipping_address_id');
+
+        $shippingAmount     = 0.0;     // lo que se cobra HOY
+        $shippingEstimated  = null;    // estimado de la zona (solo referencia)
+        $shippingZone       = null;
+        $shippingRate       = null;
+        $depositDefault     = 50.00;   // monto sugerido de depósito
+
+        if ($shippingMode === 'deposit') {
+            // Dirección elegida o la predeterminada
+            $address = $addresses->firstWhere('id', $addressId) ?? $addresses->first();
+
+            if ($address) {
+                $shippingZone = ShippingZone::findByDistrict($address->district);
+                $shippingRate = $shippingZone?->rates()->orderBy('price')->first();
+                $shippingEstimated = $shippingRate?->price ?? 0.0;
+            }
+
+            // Lo que cobras hoy por envío (editable en la vista)
+            $shippingAmount = (float) $request->input('shipping_deposit', $depositDefault);
+        } elseif ($shippingMode === 'to_be_quoted') {
+            $shippingAmount    = 0.0;   // hoy no cobras envío
+            $shippingEstimated = null;  // se definirá luego
+        } else { // pickup
+            $shippingAmount    = 0.0;
+            $shippingEstimated = 0.0;
+        }
+
+        $grandTotal = round($total + $shippingAmount, 2);
+
+        return view('checkout.show', compact(
+            'lines',
+            'subtotal',
+            'igv',
+            'total',
+            'addresses',
+            'shippingMode',
+            'addressId',
+            'shippingZone',
+            'shippingRate',
+            'shippingEstimated',
+            'shippingAmount',
+            'grandTotal',
+            'depositDefault'
+        ));
+    }
     public function place(Request $request, PricingService $pricing)
     {
         $data = $request->validate([
