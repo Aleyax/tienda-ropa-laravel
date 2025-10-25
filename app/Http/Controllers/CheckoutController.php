@@ -57,6 +57,11 @@ class CheckoutController extends Controller
         $shippingMode = $request->input('shipping_mode', 'pickup');
         $addressId    = (int) $request->input('shipping_address_id');
 
+        // ✅ Si es depósito y no vino addressId, toma la primera (o la default)
+        if ($shippingMode === 'deposit' && !$addressId && $addresses->isNotEmpty()) {
+            $addressId = $addresses->first()->id;
+        }
+
         $shippingAmount     = 0.0;     // lo que se cobra HOY
         $shippingEstimated  = null;    // estimado de la zona (solo referencia)
         $shippingZone       = null;
