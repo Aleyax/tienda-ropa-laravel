@@ -44,7 +44,9 @@ class AddressController extends Controller
         if (!$user->addresses()->exists() || $request->boolean('is_default')) {
             $validated['is_default'] = true;
         }
-
+        if ($validated['is_default']) {
+            \App\Models\Address::where('user_id', $validated['user_id'])->update(['is_default' => false]);
+        }
         $address = \App\Models\Address::create($validated);
 
         // ✅ Si el cliente pide JSON (AJAX), devolvemos JSON

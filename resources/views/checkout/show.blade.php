@@ -82,7 +82,7 @@
                     <div class="grid md:grid-cols-2 gap-3 mt-3">
                         <div>
                             <label class="block text-sm text-gray-600 mb-1">Dirección de entrega</label>
-                            <select name="shipping_address_id" class="border p-2 w-full" onchange="this.form.submit()">
+                            <select id="addressSelect" name="shipping_address_id" class="border p-2 w-full" onchange="this.form.submit()">
                                 @forelse($addresses as $addr)
                                 <option value="{{ $addr->id }}" @selected($addr->id == $addressId)>
                                     {{ $addr->district }} — {{ $addr->line1 }} ({{ $addr->contact_name }})
@@ -91,6 +91,13 @@
                                 <option value="">(No tienes direcciones)</option>
                                 @endforelse
                             </select>
+
+                            {{-- BOTÓN NUEVA DIRECCIÓN (abre modal) --}}
+                            <button type="button"
+                                class="px-3 py-2 border rounded mt-3 hover:bg-gray-50"
+                                onclick="openAddressModal()">
+                                + Nueva dirección
+                            </button>
                             @if($addresses->isEmpty())
                             <div class="text-sm text-gray-500 mt-1">
                                 Crea una dirección en
@@ -203,4 +210,120 @@
         }
         toggleSections();
     </script>
+
+    {{-- Modal crear dirección --}}
+    <div id="addressModal"
+        class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
+        <div class="bg-white w-full max-w-lg rounded-xl shadow p-5">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-semibold">Nueva dirección</h3>
+                <button type="button" class="text-gray-500 hover:text-gray-700" onclick="closeAddressModal()">✕</button>
+            </div>
+
+            <form id="addressForm" class="space-y-3">
+                @csrf
+                <div>
+                    <label class="text-sm text-gray-600">Contacto</label>
+                    <input name="contact_name" class="border p-2 w-full" required>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-600">Teléfono</label>
+                    <input name="phone" class="border p-2 w-full" required>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-600">Distrito</label>
+                    <input name="district" class="border p-2 w-full" placeholder="Ej: La Victoria" required>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-600">Dirección (línea 1)</label>
+                    <input name="line1" class="border p-2 w-full" placeholder="Calle, número, block…" required>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-600">Referencia (opcional)</label>
+                    <input name="reference" class="border p-2 w-full">
+                </div>
+                <label class="inline-flex items-center gap-2">
+                    <input type="checkbox" name="is_default" value="1">
+                    <span>Marcar como predeterminada</span>
+                </label>
+
+                <div id="addrErrors" class="text-red-600 text-sm hidden"></div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" class="px-4 py-2 border rounded" onclick="closeAddressModal()">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openAddressModal() {
+            document.getElementById('addressModal').classList.remove('hidden');
+            document.getElementById('addressModal').classList.add('flex');
+        }
+
+        function closeAddressModal() {
+            document.getElementById('addressModal').classList.add('hidden');
+            document.getElementById('addressModal').classList.remove('flex');
+        }
+
+        // Envío AJAX del modal
+        document.getElementById('addressForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const fd = new FormData(form);
+
+            const res = await fetch(`{{ route('addresses.store') }}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                        'Accept': 'application/json'
+                    },
+                    body: fd
+                });
+
+            const errBox = document.getElementById('addrErrors');
+            errBox.classList.add('hidden');
+            errBox.innerHTML = '';
+
+            if (res.ok) {
+                const data = await res.json(); // { address: {...} }
+                const a = data.address;
+
+                // Append option al select y seleccionarla
+                const sel = document.getElementById('addressSelect');
+                const opt = new Option(`${a.district} — ${a.line1} (${a.contact_name})`, a.id, true, true);
+                if (sel) {
+                    // Si el select estaba vacío, primero limpia las opciones
+                    if (sel.options.length === 1 && sel.options[0].value === '') sel.options.length = 0;
+                    sel.add(opt);
+                    sel.value = a.id;
+                }
+
+                // Cerrar modal
+                closeAddressModal();
+
+                // Recalcular envío con el nuevo address (submit del Form A - GET)
+                document.getElementById('shipForm').submit();
+            } else {
+                // Mostrar validaciones
+                try {
+                    const payload = await res.json();
+                    if (payload?.errors) {
+                        const msgs = Object.values(payload.errors).flat();
+                        errBox.innerHTML = msgs.map(m => `<div>• ${m}</div>`).join('');
+                        errBox.classList.remove('hidden');
+                    } else {
+                        errBox.textContent = 'Ocurrió un error al guardar la dirección.';
+                        errBox.classList.remove('hidden');
+                    }
+                } catch (_) {
+                    errBox.textContent = 'Ocurrió un error al guardar la dirección.';
+                    errBox.classList.remove('hidden');
+                }
+            }
+        });
+    </script>
+
 </x-app-layout>
