@@ -41,8 +41,12 @@ class ProductController extends Controller
 
     public function edit(Product $product)
     {
-        $mode = 'edit';
-        return view('admin.products.form', compact('product', 'mode'));
+
+        $colors = \App\Models\Color::orderBy('name')->get();
+        $sizes  = \App\Models\Size::orderBy('code')->get();
+        $mode   = 'edit';
+
+        return view('admin.products.form', compact('product', 'mode', 'colors', 'sizes'));
     }
 
     public function update(Request $r, Product $product)

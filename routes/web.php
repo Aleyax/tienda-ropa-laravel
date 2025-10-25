@@ -8,10 +8,23 @@ use App\Http\Controllers\CartController;
 use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Admin\ProductController;
+use App\Http\Controllers\Admin\ProductVariantController;
+use App\Http\Controllers\Admin\MediaController;
+use App\Http\Controllers\AddressController;
 
 Route::get('/', function () {
     return view('welcome');
 });
+
+// Variantes
+Route::post('/products/{product}/variants', [ProductVariantController::class, 'store'])->name('admin.variants.store');
+Route::put('/variants/{variant}', [ProductVariantController::class, 'update'])->name('admin.variants.update');
+Route::delete('/variants/{variant}', [ProductVariantController::class, 'destroy'])->name('admin.variants.destroy');
+
+// Imágenes por color
+Route::post('/products/{product}/media', [MediaController::class, 'store'])->name('admin.media.store');
+Route::delete('/media/{media}', [MediaController::class, 'destroy'])->name('admin.media.destroy');
+
 
 Route::post('/cart/add', [CartController::class, 'add'])->name('cart.add');
 Route::get('/cart', [CartController::class, 'index'])->name('cart.index');
@@ -36,7 +49,11 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/checkout/upload-voucher', [CheckoutController::class, 'uploadVoucher'])->name('checkout.voucher');
 });
 
-
+Route::middleware('auth')->group(function () {
+    Route::get('/addresses', [AddressController::class, 'index'])->name('addresses.index');
+    Route::post('/addresses', [AddressController::class, 'store'])->name('addresses.store');
+    Route::delete('/addresses/{address}', [AddressController::class, 'destroy'])->name('addresses.destroy');
+});
 
 Route::middleware(['auth', 'permission:orders.view'])
     ->prefix('admin')->name('admin.')->group(function () {

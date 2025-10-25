@@ -6,15 +6,15 @@ use Illuminate\Database\Eloquent\Model;
 
 class Product extends Model
 {
-    protected $fillable = ['name','slug','description','status','price_base'];
+    protected $fillable = ['name', 'slug', 'description', 'status', 'price_base'];
 
 
     public function variants()
     {
-        return $this->hasMany(ProductVariant::class);
+        return $this->hasMany(\App\Models\ProductVariant::class);
     }
     public function media()
     {
-        return $this->hasMany(Media::class);
+        return $this->hasMany(\App\Models\Media::class);
     }
 }

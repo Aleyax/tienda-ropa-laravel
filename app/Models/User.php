@@ -51,4 +51,8 @@ class User extends Authenticatable
     {
         return $this->belongsTo(\App\Models\CustomerGroup::class, 'group_id');
     }
+    public function addresses()
+    {
+        return $this->hasMany(\App\Models\Address::class);
+    }
 }
