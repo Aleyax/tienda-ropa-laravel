@@ -24,7 +24,7 @@ class User extends Authenticatable
         'email',
         'password',
     ];
-
+    protected $guard_name = 'web';
     /**
      * The attributes that should be hidden for serialization.
      *
@@ -55,5 +55,12 @@ class User extends Authenticatable
     {
         return $this->hasMany(\App\Models\Address::class);
     }
-
+    public function isWholesale(): bool
+    {
+        return optional($this->group)->name === 'mayorista';
+    }
+    public function isRetail(): bool
+    {
+        return optional($this->group)->name === 'minorista';
+    }
 }

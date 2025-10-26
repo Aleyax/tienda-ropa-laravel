@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Filesystem\FilesystemAdapter;
 use App\Models\Address;
+use App\Models\Setting;
 use Illuminate\Support\Str;
 use App\Models\ShippingZone;
 use Illuminate\Support\Facades\DB;
@@ -109,14 +110,10 @@ class CheckoutController extends Controller
     }
     public function place(Request $request, PricingService $pricing)
     {
-
-
-
-
-
         try {
             return DB::transaction(function () use ($request, $pricing) {
 
+                /** @var User|null $user */
                 $user = Auth::user();
 
                 // 1) Recalcular carrito
@@ -135,7 +132,7 @@ class CheckoutController extends Controller
                         ? $pricing->priceForWithSource($user, $product, $variant->id)
                         : [$pricing->priceFor($user, $product, $variant->id)];
 
-                    $qty     = (int)$line['qty'];
+                    $qty     = (int)($line['qty'] ?? 1);
                     $amount  = $price * $qty;
                     $subtotal += $amount;
 
@@ -156,7 +153,7 @@ class CheckoutController extends Controller
                     'shipping_deposit'     => 'required_if:shipping_mode,deposit|numeric|min:0',
                 ]);
 
-                // 3) Envío (igual a tu lógica actual)
+                // 3) Envío
                 $shippingMode      = $data['shipping_mode'];
                 $shippingAddressId = null;
                 $shippingZoneId    = null;
@@ -188,11 +185,28 @@ class CheckoutController extends Controller
 
                 $grandTotal = round($total + $shippingAmount, 2);
 
-                // 4) VERIFICAR STOCK CON LOCK (stock duro)
+                // 3.5) Regla Mayorista: mínimo de primera compra
+                $isWholesale = method_exists($user, 'isWholesale') ? ($user->isWholesale() ?? false) : false;
+
+                if ($isWholesale) {
+                    $ordersCount = Order::where('user_id', $user->id)
+                        ->where('status', '!=', 'cancelled')
+                        ->count();
+
+                    if ($ordersCount === 0) {
+                        $min = (float) Setting::getValue('wholesale_first_order_min', 160.00);
+                        if ($grandTotal < $min) {
+                            throw new \RuntimeException(
+                                'Tu primera compra mayorista debe ser al menos S/ ' . number_format($min, 2) . '.'
+                            );
+                        }
+                    }
+                }
+
+                // 4) Verificar stock con LOCK (stock duro)
                 foreach ($lines as $l) {
                     $locked = ProductVariant::where('id', $l['variant']->id)->lockForUpdate()->first();
                     if ($locked->stock < $l['qty']) {
-                        // aborta transacción y vuelve con error claro
                         throw new \RuntimeException("Stock insuficiente para {$locked->sku}. Disponible: {$locked->stock}, requerido: {$l['qty']}");
                     }
                 }
@@ -224,7 +238,6 @@ class CheckoutController extends Controller
                 // 6) Descontar stock y crear ítems
                 foreach ($lines as $l) {
                     $locked = ProductVariant::where('id', $l['variant']->id)->lockForUpdate()->first();
-                    // Revalidar por seguridad (misma transacción)
                     if ($locked->stock < $l['qty']) {
                         throw new \RuntimeException("Stock insuficiente para {$locked->sku}. Disponible: {$locked->stock}, requerido: {$l['qty']}");
                     }
@@ -242,7 +255,7 @@ class CheckoutController extends Controller
                     ]);
                 }
 
-                // 7) Registrar pago inicial (como tienes)
+                // 7) Registrar pago inicial
                 OrderPayment::create([
                     'order_id' => $order->id,
                     'method'   => $data['payment_method'],
@@ -257,10 +270,8 @@ class CheckoutController extends Controller
                 return redirect()->route('checkout.thanks', $order)->with('success', 'Pedido creado correctamente.');
             });
         } catch (\RuntimeException $e) {
-            // vuelve al carrito con el mensaje claro
             return redirect()->route('cart.index')->with('error', $e->getMessage());
         } catch (\Throwable $e) {
-            // error inesperado
             report($e);
             return redirect()->route('cart.index')->with('error', 'Ocurrió un error al confirmar. Intenta nuevamente.');
         }
