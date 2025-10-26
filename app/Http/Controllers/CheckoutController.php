@@ -14,10 +14,9 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Filesystem\FilesystemAdapter;
 use App\Models\Address;
-use App\Models\Setting;
-use Illuminate\Support\Str;
 use App\Models\ShippingZone;
 use Illuminate\Support\Facades\DB;
+use App\Models\Setting;
 
 class CheckoutController extends Controller
 {
@@ -26,7 +25,6 @@ class CheckoutController extends Controller
         $cart = session('cart', []);
         if (empty($cart)) return redirect()->route('cart.index');
 
-        // --- Recalcular líneas y totales (tu lógica actual) ---
         $lines = [];
         $subtotal = 0;
         foreach ($cart as $line) {
@@ -34,14 +32,15 @@ class CheckoutController extends Controller
             $variant = ProductVariant::find($line['variant_id']);
 
             [$price, $source] = method_exists($pricing, 'priceForWithSource')
-                ? $pricing->priceForWithSource(Auth::user(), $product, $variant->id)
-                : [$pricing->priceFor(Auth::user(), $product, $variant->id), 'auto'];
+                ? $pricing->priceForWithSource(Auth::user(), $product, $variant?->id)
+                : [$pricing->priceFor(Auth::user(), $product, $variant?->id), 'auto'];
 
-            $amount   = $price * $line['qty'];
+            $qty     = (int)($line['qty'] ?? 1);
+            $amount  = $price * $qty;
             $subtotal += $amount;
 
             $lines[] = compact('product', 'variant') + [
-                'qty'    => $line['qty'],
+                'qty'    => $qty,
                 'price'  => $price,
                 'amount' => $amount,
                 'source' => $source,
@@ -50,28 +49,24 @@ class CheckoutController extends Controller
         $igv   = round($subtotal * 0.18, 2);
         $total = round($subtotal + $igv, 2);
 
-        // --- Nuevos: Envío / Recojo ---
         /** @var User|null $user */
         $user      = Auth::user();
         $addresses = $user ? $user->addresses()->orderByDesc('is_default')->get() : collect();
 
-        // pickup | deposit | to_be_quoted
-        $shippingMode = $request->input('shipping_mode', 'pickup');
+        $shippingMode = $request->input('shipping_mode', 'pickup'); // pickup | deposit | to_be_quoted
         $addressId    = (int) $request->input('shipping_address_id');
 
-        // ✅ Si es depósito y no vino addressId, toma la primera (o la default)
         if ($shippingMode === 'deposit' && !$addressId && $addresses->isNotEmpty()) {
             $addressId = $addresses->first()->id;
         }
 
-        $shippingAmount     = 0.0;     // lo que se cobra HOY
-        $shippingEstimated  = null;    // estimado de la zona (solo referencia)
+        $shippingAmount     = 0.0;
+        $shippingEstimated  = null;
         $shippingZone       = null;
         $shippingRate       = null;
-        $depositDefault     = 50.00;   // monto sugerido de depósito
+        $depositDefault     = 50.00;
 
         if ($shippingMode === 'deposit') {
-            // Dirección elegida o la predeterminada
             $address = $addresses->firstWhere('id', $addressId) ?? $addresses->first();
 
             if ($address) {
@@ -80,11 +75,10 @@ class CheckoutController extends Controller
                 $shippingEstimated = $shippingRate?->price ?? 0.0;
             }
 
-            // Lo que cobras hoy por envío (editable en la vista)
             $shippingAmount = (float) $request->input('shipping_deposit', $depositDefault);
         } elseif ($shippingMode === 'to_be_quoted') {
-            $shippingAmount    = 0.0;   // hoy no cobras envío
-            $shippingEstimated = null;  // se definirá luego
+            $shippingAmount    = 0.0;
+            $shippingEstimated = null;
         } else { // pickup
             $shippingAmount    = 0.0;
             $shippingEstimated = 0.0;
@@ -108,12 +102,13 @@ class CheckoutController extends Controller
             'depositDefault'
         ));
     }
+
     public function place(Request $request, PricingService $pricing)
     {
         try {
             return DB::transaction(function () use ($request, $pricing) {
 
-                /** @var User|null $user */
+                /** @var User $user */
                 $user = Auth::user();
 
                 // 1) Recalcular carrito
@@ -203,15 +198,7 @@ class CheckoutController extends Controller
                     }
                 }
 
-                // 4) Verificar stock con LOCK (stock duro)
-                foreach ($lines as $l) {
-                    $locked = ProductVariant::where('id', $l['variant']->id)->lockForUpdate()->first();
-                    if ($locked->stock < $l['qty']) {
-                        throw new \RuntimeException("Stock insuficiente para {$locked->sku}. Disponible: {$locked->stock}, requerido: {$l['qty']}");
-                    }
-                }
-
-                // 5) Crear orden
+                // 4) Crear orden (igual para ambos; la diferencia está en ítems y stock)
                 $order = Order::create([
                     'user_id'                    => $user->id,
                     'subtotal'                   => $subtotal,
@@ -235,27 +222,51 @@ class CheckoutController extends Controller
                     'payment_status'             => $data['payment_method'] === 'online' ? 'authorized' : 'unpaid',
                 ]);
 
-                // 6) Descontar stock y crear ítems
-                foreach ($lines as $l) {
-                    $locked = ProductVariant::where('id', $l['variant']->id)->lockForUpdate()->first();
-                    if ($locked->stock < $l['qty']) {
-                        throw new \RuntimeException("Stock insuficiente para {$locked->sku}. Disponible: {$locked->stock}, requerido: {$l['qty']}");
+                /*
+                 * 5) RAMA DE CUMPLIMIENTO
+                 * - Retail (minorista): stock duro (lock + decrement).
+                 * - Wholesale (mayorista): NO descuenta stock; registra backorder_qty.
+                 */
+                if ($isWholesale) {
+                    // Mayorista: NO tocar stock; solo crear ítems con backorder_qty
+                    foreach ($lines as $l) {
+                        $variant = $l['variant']; // NO lock, NO decrement
+                        OrderItem::create([
+                            'order_id'       => $order->id,
+                            'product_id'     => $l['product']->id,
+                            'variant_id'     => $variant->id,
+                            'name'           => $l['product']->name,
+                            'sku'            => $variant->sku,
+                            'unit_price'     => $l['price'],
+                            'qty'            => $l['qty'],           // lo pedido
+                            'backorder_qty'  => $l['qty'],           // todo queda pendiente
+                            'amount'         => $l['amount'],
+                        ]);
                     }
-                    $locked->decrement('stock', $l['qty']);
+                } else {
+                    // Minorista: stock duro con lock
+                    foreach ($lines as $l) {
+                        $locked = ProductVariant::where('id', $l['variant']->id)->lockForUpdate()->first();
+                        if ($locked->stock < $l['qty']) {
+                            throw new \RuntimeException("Stock insuficiente para {$locked->sku}. Disponible: {$locked->stock}, requerido: {$l['qty']}");
+                        }
+                        $locked->decrement('stock', $l['qty']);
 
-                    OrderItem::create([
-                        'order_id'   => $order->id,
-                        'product_id' => $l['product']->id,
-                        'variant_id' => $locked->id,
-                        'name'       => $l['product']->name,
-                        'sku'        => $locked->sku,
-                        'unit_price' => $l['price'],
-                        'qty'        => $l['qty'],
-                        'amount'     => $l['amount'],
-                    ]);
+                        OrderItem::create([
+                            'order_id'       => $order->id,
+                            'product_id'     => $l['product']->id,
+                            'variant_id'     => $locked->id,
+                            'name'           => $l['product']->name,
+                            'sku'            => $locked->sku,
+                            'unit_price'     => $l['price'],
+                            'qty'            => $l['qty'],
+                            'backorder_qty'  => 0,                   // retail no deja pendientes
+                            'amount'         => $l['amount'],
+                        ]);
+                    }
                 }
 
-                // 7) Registrar pago inicial
+                // 6) Registrar pago inicial
                 OrderPayment::create([
                     'order_id' => $order->id,
                     'method'   => $data['payment_method'],
@@ -265,7 +276,7 @@ class CheckoutController extends Controller
                     'notes'    => $data['payment_method'] === 'cod' ? ($request->input('cod_pay_type') ?? null) : null,
                 ]);
 
-                // 8) Vaciar carrito y redirigir
+                // 7) Limpiar carrito y terminar
                 session()->forget('cart');
                 return redirect()->route('checkout.thanks', $order)->with('success', 'Pedido creado correctamente.');
             });
@@ -276,8 +287,6 @@ class CheckoutController extends Controller
             return redirect()->route('cart.index')->with('error', 'Ocurrió un error al confirmar. Intenta nuevamente.');
         }
     }
-
-
 
     public function uploadVoucher(Request $request)
     {
@@ -290,7 +299,6 @@ class CheckoutController extends Controller
         if ($order->payment_method !== 'transfer') {
             return back()->with('error', 'Este pedido no es de transferencia.');
         }
-
 
         $path = $request->file('voucher')->store('vouchers', 'public');
         /** @var FilesystemAdapter $storage */
