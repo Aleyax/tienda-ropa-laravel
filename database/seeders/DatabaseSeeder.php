@@ -24,6 +24,7 @@ class DatabaseSeeder extends Seeder
             SizeSeeder::class,
             CatalogSeeder::class,
             RolesSeeder::class,
+            SettingSeeder::class
         ]);
     }
 }
