@@ -46,7 +46,14 @@
                 <input type="hidden" name="product_id" value="{{ $product->id }}">
                 <input type="hidden" name="variant_id" value="{{ optional($variant)->id }}">
                 <input type="number" name="qty" value="1" min="1" max="{{ optional($variant)->stock ?? 1 }}" class="border p-2 w-24">
+
                 <button class="bg-blue-600 text-white px-4 py-2 rounded">Añadir al carrito</button>
+                @if(session('success'))
+                <div class="mb-2 bg-green-100 text-green-800 p-2 rounded">{{ session('success') }}</div>
+                @endif
+                @if(session('error'))
+                <div class="mb-2 bg-red-100 text-red-800 p-2 rounded">{{ session('error') }}</div>
+                @endif
             </form>
             @else
             <div class="text-red-600">Sin stock</div>

@@ -5,10 +5,12 @@
 
 
     <div class="p-6">
+        @if(session('error'))
+        <div class="mb-4 bg-red-100 text-red-800 p-2 rounded">{{ session('error') }}</div>
+        @endif
         @if(session('success'))
         <div class="mb-4 bg-green-100 text-green-800 p-2 rounded">{{ session('success') }}</div>
         @endif
-
 
         @if(empty($lines))
         <p>Tu carrito está vacío.</p>
