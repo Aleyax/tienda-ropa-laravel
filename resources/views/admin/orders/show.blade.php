@@ -35,7 +35,9 @@
             <th class="p-2 border">Precio</th>
             <th class="p-2 border">Cant.</th>
             <th class="p-2 border">Importe</th>
-            <th class="p-2 border">Origen</th>
+            <th class="p-2 border">Backorder</th>
+            <th class="p-2 border">Stock</th>
+            <th class="p-2 border">Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -49,7 +51,40 @@
             <td class="p-2 border">S/ {{ number_format($it->unit_price,2) }}</td>
             <td class="p-2 border">{{ $it->qty }}</td>
             <td class="p-2 border">S/ {{ number_format($it->amount,2) }}</td>
-            <td class="p-2 border text-xs text-gray-500">{{ $it->price_source }}</td>
+
+            {{-- Backorder pendiente --}}
+            <td class="p-2 border">
+              @if((int)$it->backorder_qty > 0)
+              <span class="px-2 py-1 text-yellow-800 bg-yellow-100 rounded">{{ $it->backorder_qty }}</span>
+              @else
+              <span class="px-2 py-1 text-green-800 bg-green-100 rounded">OK</span>
+              @endif
+            </td>
+
+            {{-- Stock actual --}}
+            <td class="p-2 border">{{ (int)($variant->stock ?? 0) }}</td>
+
+            {{-- Acciones: PICK / (opcional) UNPICK --}}
+            <td class="p-2 border">
+              @if((int)$it->backorder_qty > 0)
+              <form method="POST" action="{{ route('admin.orders.items.pick', [$order, $it]) }}" class="flex items-center gap-2">
+                @csrf
+                <input type="number" name="qty" min="1" max="{{ $it->backorder_qty }}" value="{{ $it->backorder_qty }}" class="border p-1 w-20">
+                <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm">Pick</button>
+              </form>
+              @endif
+
+              {{-- (Opcional) Unpick si te equivocas --}}
+
+              @if(($it->qty - $it->backorder_qty) > 0)
+              <form method="POST" action="{{ route('admin.orders.items.unpick', [$order, $it]) }}" class="flex items-center gap-2 mt-2">
+                @csrf
+                <input type="number" name="qty" min="1" max="{{ $it->qty - $it->backorder_qty }}" value="1" class="border p-1 w-20">
+                <button class="bg-gray-600 text-white px-2 py-1 rounded text-sm">Unpick</button>
+              </form>
+              @endif
+
+            </td>
           </tr>
           @endforeach
         </tbody>

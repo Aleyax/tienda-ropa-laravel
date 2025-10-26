@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
-
+use App\Models\ProductVariant;
+use Illuminate\Support\Facades\DB;
+use App\Models\OrderItem;
 class OrderController extends Controller
 {
     // Lista con filtros simples (?method=&pstatus=&status=)
@@ -104,6 +106,83 @@ class OrderController extends Controller
         Order::whereIn('id', $data['ids'])->update($update);
         return back()->with('success', 'Estados de pago actualizados.');
     }
+    public function pickItem(Request $request, Order $order, OrderItem $item)
+    {
+        // Valida que el ítem pertenezca al pedido
+        if ($item->order_id !== $order->id) {
+            abort(404);
+        }
+
+        $data = $request->validate([
+            'qty' => 'required|integer|min:1',
+        ]);
+
+        $qtyToPick = (int)$data['qty'];
+
+        return DB::transaction(function () use ($order, $item, $qtyToPick) {
+            $item->refresh(); // estado más reciente
+            $variant = ProductVariant::where('id', $item->variant_id)->lockForUpdate()->first();
+
+            if (!$variant) {
+                return back()->with('error', 'Variante no encontrada.');
+            }
+
+            // Reglas:
+            // 1) No puedes pickear más de lo pendiente en backorder
+            if ($qtyToPick > $item->backorder_qty) {
+                return back()->with('error', 'No puedes pickear más que el backorder pendiente.');
+            }
+
+            // 2) No puedes pickear más del stock disponible
+            if ($qtyToPick > $variant->stock) {
+                return back()->with('error', "Stock insuficiente. Disponible: {$variant->stock}.");
+            }
+
+            // Descuenta stock real y reduce backorder
+            $variant->decrement('stock', $qtyToPick);
+            $item->decrement('backorder_qty', $qtyToPick);
+
+            // (Opcional) si quieres reflejar montos/estado en order según progreso, puedes hacerlo aquí.
+
+            return back()->with('success', "Pick registrado por {$qtyToPick} unidades de {$item->sku}.");
+        });
+    }
+
+    public function unpickItem(Request $request, Order $order, OrderItem $item)
+    {
+        // Valida que el ítem pertenezca al pedido
+        if ($item->order_id !== $order->id) {
+            abort(404);
+        }
+
+        $data = $request->validate([
+            'qty' => 'required|integer|min:1',
+        ]);
+
+        $qtyToUnpick = (int)$data['qty'];
+
+        return DB::transaction(function () use ($order, $item, $qtyToUnpick) {
+            $variant = ProductVariant::where('id', $item->variant_id)->lockForUpdate()->first();
+
+            if (!$variant) {
+                return back()->with('error', 'Variante no encontrada.');
+            }
+
+            // Reglas: "unpick" significa revertir un pick ya hecho (reponer stock y aumentar backorder)
+            // No deberías unpickear más allá del total original pedido (qty), ni dejar backorder por encima del qty
+            $maxPending = $item->qty - $item->backorder_qty; // esto es lo que ya pickeaste antes
+            if ($qtyToUnpick > $maxPending) {
+                return back()->with('error', 'No puedes revertir más de lo que ya está pickeado.');
+            }
+
+            // Reponer stock y aumentar backorder
+            $variant->increment('stock', $qtyToUnpick);
+            $item->increment('backorder_qty', $qtyToUnpick);
+
+            return back()->with('success', "Unpick registrado por {$qtyToUnpick} unidades de {$item->sku}.");
+        });
+    }
+
     public function export(Request $request): StreamedResponse
     {
         // Reutiliza EXACTAMENTE los mismos filtros que index()
@@ -146,5 +225,4 @@ class OrderController extends Controller
             'Content-Type' => 'text/csv; charset=UTF-8',
         ]);
     }
-    
 }

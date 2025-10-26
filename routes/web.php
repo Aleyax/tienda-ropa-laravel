@@ -92,6 +92,14 @@ Route::middleware(['auth'])
     ->prefix('admin')->name('admin.')
     ->group(function () {
 
+
+        Route::post('/orders/{order}/items/{item}/pick', [OrderController::class, 'pickItem'])
+            ->middleware('permission:orders.update')
+            ->name('orders.items.pick');
+
+        Route::post('/orders/{order}/items/{item}/unpick', [OrderController::class, 'unpickItem'])
+            ->middleware('permission:orders.update')
+            ->name('orders.items.unpick');
         // -------- Pedidos (con permisos propios)
         Route::middleware('permission:orders.view')->group(function () {
             Route::get('/orders',                [OrderController::class, 'index'])->name('orders.index');
