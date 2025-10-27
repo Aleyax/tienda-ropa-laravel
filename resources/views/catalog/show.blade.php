@@ -16,20 +16,6 @@
             {{-- Mensajes de estado / visibilidad --}}
             @if($product->discontinued)
                 <div class="mb-3 text-red-600 font-semibold">Producto descontinuado (no disponible para compra)</div>
-            @else
-                @if($isWholesale)
-                    @if(!$product->available_for_wholesale)
-                        <div class="mb-3 text-orange-600">No disponible para mayoristas.</div>
-                    @elseif($variant && !$variant->available_for_wholesale)
-                        <div class="mb-3 text-orange-600">Esta variante no está disponible para mayoristas.</div>
-                    @elseif($variant && (int)$variant->stock <= 0)
-                        <div class="mb-3 text-yellow-700">Sin stock inmediato — disponible como backorder para mayoristas.</div>
-                    @endif
-                @else
-                    @if(!$variant || (int)$variant->stock <= 0)
-                        <div class="mb-3 text-red-600">Sin stock</div>
-                    @endif
-                @endif
             @endif
 
             {{-- Selectores de color/talla (como ya tienes) --}}

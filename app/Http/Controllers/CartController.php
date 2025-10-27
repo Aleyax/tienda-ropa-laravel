@@ -1,46 +1,44 @@
 <?php
 
-
 namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\User;
 use App\Services\PricingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class CartController extends Controller
 {
-
     public function index(PricingService $pricing)
     {
-        $cart = session()->get('cart', []); // array de líneas
+        $cart = session()->get('cart', []);
 
-
-        // Recalcular precios por si cambió la lista/usuario
+        $user = Auth::user();
+        //$isWholesale = $user?->isWholesale() ?? false;
+        $isWholesale = $user instanceof User ? $user->isWholesale() : false;
         $lines = [];
         $subtotal = 0;
         foreach ($cart as $line) {
             $product = Product::find($line['product_id']);
             $variant = ProductVariant::find($line['variant_id']);
+
             [$price, $source] = method_exists($pricing, 'priceForWithSource')
                 ? $pricing->priceForWithSource(Auth::user(), $product, optional($variant)->id)
                 : [$pricing->priceFor(Auth::user(), $product, optional($variant)->id), 'auto'];
 
-
-            $line['price'] = $price; // precio unitario vigente
-            $line['source'] = $source; // origen
+            $line['price']  = $price;
+            $line['source'] = $source;
             $line['amount'] = $price * $line['qty'];
             $subtotal += $line['amount'];
             $lines[] = $line;
         }
 
-
-        $igv = round($subtotal * 0.18, 2);
+        $igv   = round($subtotal * 0.18, 2);
         $total = round($subtotal + $igv, 2);
 
-
-        return view('cart.index', compact('lines', 'subtotal', 'igv', 'total'));
+        return view('cart.index', compact('lines', 'subtotal', 'igv', 'total', 'isWholesale'));
     }
 
 
@@ -52,8 +50,12 @@ class CartController extends Controller
             'qty'        => 'required|integer|min:1',
         ]);
 
-        $product = \App\Models\Product::findOrFail($data['product_id']);
-        $variant = \App\Models\ProductVariant::with(['product'])->findOrFail($data['variant_id']);
+        /** @var \App\Models\User|null $user */
+        $user = Auth::user();
+        $isWholesale = $user instanceof User ? $user->isWholesale() : false;
+
+        $product = Product::findOrFail($data['product_id']);
+        $variant = ProductVariant::with(['product'])->findOrFail($data['variant_id']);
 
         if ($variant->product_id !== $product->id) {
             return back()->with('error', 'La variante no corresponde al producto.');
@@ -70,16 +72,16 @@ class CartController extends Controller
             }
         }
 
-        $maxAddable = max(0, $available - $currentQtyInCart);
+        $maxAddable = $isWholesale ? $requested : max(0, $available - $currentQtyInCart);
 
-        if ($maxAddable <= 0) {
-            return back()->with('error', "No hay más  stock disponible para {$variant->sku}.");
+        if (!$isWholesale && $maxAddable <= 0) {
+            return back()->with('error', "No hay más stock disponible para {$variant->sku}.");
         }
 
         $finalToAdd = min($requested, $maxAddable);
-        $adjusted   = $finalToAdd !== $requested;
+        $adjusted   = !$isWholesale && $finalToAdd !== $requested;
 
-        // Agregar/actualizar
+        // Agregar/actualizar línea en carrito
         $found = false;
         foreach ($cart as &$line) {
             if ((int)$line['variant_id'] === (int)$variant->id) {
@@ -110,7 +112,11 @@ class CartController extends Controller
 
     public function update(Request $request)
     {
-        // ¿viene un solo ítem (form por fila) o arrays (form global)?
+        /** @var \App\Models\User|null $user */
+        $user = Auth::user();
+        $isWholesale = $user instanceof User ? $user->isWholesale() : false;
+
+        // Caso simple: un solo item
         $isScalar = $request->has('variant_id') && !is_array($request->input('variant_id'));
 
         if ($isScalar) {
@@ -119,14 +125,13 @@ class CartController extends Controller
                 'qty'        => 'required|integer|min:0',
             ]);
 
-            $variant = \App\Models\ProductVariant::findOrFail((int)$data['variant_id']);
+            $variant = ProductVariant::findOrFail((int)$data['variant_id']);
             $requested = (int)$data['qty'];
-            $allowed   = max(0, min($requested, (int)$variant->stock));
+            $allowed = $isWholesale ? $requested : max(0, min($requested, (int)$variant->stock));
 
             $cart = session('cart', []);
             $changed = false;
 
-            // si qty==0, quitar
             if ($allowed === 0 && $requested === 0) {
                 foreach ($cart as $i => $line) {
                     if ((int)$line['variant_id'] === (int)$variant->id) {
@@ -139,7 +144,6 @@ class CartController extends Controller
                 return back()->with('success', 'Ítem eliminado del carrito.');
             }
 
-            // actualizar/ajustar
             foreach ($cart as $i => $line) {
                 if ((int)$line['variant_id'] === (int)$variant->id) {
                     $cart[$i]['qty'] = $allowed;
@@ -149,7 +153,7 @@ class CartController extends Controller
             }
             session(['cart' => array_values($cart)]);
 
-            if ($allowed !== $requested) {
+            if (!$isWholesale && $allowed !== $requested) {
                 return back()->with('error', "Cantidad ajustada por stock para {$variant->sku}. Nueva cantidad: {$allowed}.");
             }
             return back()->with('success', 'Carrito actualizado.');
@@ -177,8 +181,8 @@ class CartController extends Controller
 
             if (!array_key_exists($variantId, $byVariant)) continue;
 
-            $variant = \App\Models\ProductVariant::findOrFail($variantId);
-            $allowed = max(0, min($requested, (int)$variant->stock));
+            $variant = ProductVariant::findOrFail($variantId);
+            $allowed = $isWholesale ? $requested : max(0, min($requested, (int)$variant->stock));
             $idx     = $byVariant[$variantId];
 
             if ($allowed <= 0) {
@@ -189,7 +193,7 @@ class CartController extends Controller
                 continue;
             }
 
-            if ($allowed !== $requested) {
+            if (!$isWholesale && $allowed !== $requested) {
                 $adjustedMsgs[] = "SKU {$variant->sku}: solicitado {$requested}, ajustado a {$allowed}.";
             }
             $cart[$idx]['qty'] = $allowed;
@@ -209,13 +213,17 @@ class CartController extends Controller
             'variant_id' => 'required|integer|exists:product_variants,id',
         ]);
 
-
         $cart = session()->get('cart', []);
-        $key = 'v' . $data['variant_id'];
-        if (isset($cart[$key])) {
-            unset($cart[$key]);
-            session()->put('cart', $cart);
+        $variantId = (int)$data['variant_id'];
+
+        foreach ($cart as $i => $line) {
+            if ((int)$line['variant_id'] === $variantId) {
+                unset($cart[$i]);
+                break;
+            }
         }
-        return back();
+
+        session(['cart' => array_values($cart)]);
+        return back()->with('success', 'Producto eliminado del carrito.');
     }
 }

@@ -13,10 +13,10 @@ class CatalogController extends Controller
 {
     public function index()
     {
-    /** @var AppUser|null $user */
-    $user = Auth::user();
-    // Defensive: ensure the returned auth user is an instance of our Eloquent User
-    $isWholesale = ($user instanceof AppUser) ? $user->isWholesale() : false;
+        /** @var AppUser|null $user */
+        $user = Auth::user();
+        // Defensive: ensure the returned auth user is an instance of our Eloquent User
+        $isWholesale = ($user instanceof AppUser) ? $user->isWholesale() : false;
 
         // Minorista: solo productos activos, pero se muestran también agotados (con badge).
         // Mayorista: mostrar todo el catálogo, salvo descontinuados (solo info, sin comprar).
@@ -33,9 +33,9 @@ class CatalogController extends Controller
 
     public function show($slug, PricingService $pricing, Request $request)
     {
-    /** @var AppUser|null $user */
-    $user = Auth::user();
-    $isWholesale = ($user instanceof AppUser) ? $user->isWholesale() : false;
+        /** @var AppUser|null $user */
+        $user = Auth::user();
+        $isWholesale = ($user instanceof AppUser) ? $user->isWholesale() : false;
 
         $product = Product::with(['variants.color', 'variants.size', 'media'])
             ->where('slug', $slug)->firstOrFail();
