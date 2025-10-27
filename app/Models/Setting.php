@@ -12,11 +12,13 @@ class Setting extends Model
     // Método estático para acceder fácilmente
     public static function getValue(string $key, $default = null)
     {
-        return static::where('key', $key)->value('value') ?? $default;
+        $row = static::query()->where('key', $key)->first();
+        if (!$row) return $default;
+        return is_numeric($row->value) ? 0 + $row->value : $row->value;
     }
 
     public static function setValue(string $key, $value)
     {
-        return static::updateOrCreate(['key' => $key], ['value' => $value]);
+        static::query()->updateOrCreate(['key' => $key], ['value' => (string)$value]);
     }
 }

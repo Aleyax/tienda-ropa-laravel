@@ -49,7 +49,7 @@ class User extends Authenticatable
     }
     public function group()
     {
-        return $this->belongsTo(\App\Models\CustomerGroup::class, 'group_id');
+          return $this->belongsTo(CustomerGroup::class, 'group_id');
     }
     public function addresses()
     {
@@ -57,7 +57,7 @@ class User extends Authenticatable
     }
     public function isWholesale(): bool
     {
-        return optional($this->group)->name === 'mayorista';
+        return in_array($this->group?->name, ['mayorista', 'especial']);
     }
     public function isRetail(): bool
     {

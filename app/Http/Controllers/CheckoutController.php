@@ -179,7 +179,31 @@ class CheckoutController extends Controller
                 }
 
                 $grandTotal = round($total + $shippingAmount, 2);
+                // ---- Reglas de mayorista: mínimos de compra ----
 
+                $isWholesale = $user?->isWholesale() ?? false;
+
+                if ($isWholesale) {
+                    // ¿Es primer pedido no cancelado del usuario?
+                    $ordersCount = Order::where('user_id', $user->id)
+                        ->where('status', '!=', 'cancelled')
+                        ->count();
+
+                    // Mínimo para primera compra (S/160 por defecto)
+                    $minFirst = (float) Setting::getValue('wholesale_first_order_min', 160.00);
+                    if ($ordersCount === 0 && $grandTotal < $minFirst) {
+                        return redirect()->route('cart.index')
+                            ->with('error', 'Tu primera compra mayorista debe ser al menos S/ ' . number_format($minFirst, 2) . '.');
+                    }
+
+                    // (Opcional) Mínimo para cada compra mayorista
+                    $minEvery = (float) Setting::getValue('wholesale_every_order_min', 0);
+                    if ($minEvery > 0 && $grandTotal < $minEvery) {
+                        return redirect()->route('cart.index')
+                            ->with('error', 'Cada compra mayorista debe ser al menos S/ ' . number_format($minEvery, 2) . '.');
+                    }
+                }
+                // ---- fin reglas mayorista ----
                 // 3.5) Regla Mayorista: mínimo de primera compra
                 $isWholesale = method_exists($user, 'isWholesale') ? ($user->isWholesale() ?? false) : false;
 
