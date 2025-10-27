@@ -9,6 +9,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Models\ProductVariant;
 use Illuminate\Support\Facades\DB;
 use App\Models\OrderItem;
+
 class OrderController extends Controller
 {
     // Lista con filtros simples (?method=&pstatus=&status=)
@@ -16,33 +17,68 @@ class OrderController extends Controller
     {
         $q = Order::with(['user'])->latest();
 
-        // Filtros existentes
+        // Filtros existentes (método, pago, status)
         if ($m = $request->string('method')->toString())    $q->where('payment_method', $m);
         if ($ps = $request->string('pstatus')->toString())  $q->where('payment_status', $ps);
-        if ($s = $request->string('status')->toString())    $q->where('status', $s);
+        if ($s  = $request->string('status')->toString())   $q->where('status', $s);
 
-        // 🔎 Filtros nuevos
+        // 🔎 Nuevos filtros
         if ($from = $request->date('from')) $q->whereDate('created_at', '>=', $from);
         if ($to   = $request->date('to'))   $q->whereDate('created_at', '<=', $to);
+
         if ($email = $request->string('email')->toString()) {
             $q->whereHas('user', fn($uq) => $uq->where('email', 'like', "%{$email}%"));
         }
 
-        $orders   = $q->paginate(20)->withQueryString();
+        // Filtro por tipo: retail | wholesale
+        if ($type = $request->string('type')->toString()) {
+            if (in_array($type, ['retail', 'wholesale'])) {
+                $q->where('order_type', $type);
+            }
+        }
 
-        // Totales de la página y del filtro (útil para control rápido)
+        // Solo pedidos con picking pendiente (al menos un item con backorder_qty>0)
+        if ($request->boolean('pending')) {
+            $q->whereHas('items', fn($iq) => $iq->where('backorder_qty', '>', 0));
+        }
+
+        // Orden por prioridad y fecha
+        $q->orderByDesc('priority_level')->orderByDesc('created_at');
+
+        $orders = $q->paginate(20)->withQueryString();
+
+        // Totales
         $pageTotal   = $orders->sum('total');
-        $filterTotal = (clone $q)->sum('total'); // ojo: clonar ANTES del paginate
+        $filterTotal = (clone $q)->sum('total');
 
         $methods   = ['transfer', 'cod', 'online'];
         $pstatuses = ['unpaid', 'pending_confirmation', 'cod_promised', 'authorized', 'paid', 'failed', 'partially_paid'];
         $statuses  = ['new', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'];
 
-        return view(
-            'admin.orders.index',
-            compact('orders', 'methods', 'pstatuses', 'statuses', 'pageTotal', 'filterTotal')
-        );
+        // 🔢 Banners: conteo de pendientes
+        $openStatuses = ['new', 'confirmed', 'preparing'];
+        $pendingRetail = Order::where('order_type', 'retail')
+            ->whereIn('status', $openStatuses)
+            ->whereHas('items', fn($iq) => $iq->where('backorder_qty', '>', 0))
+            ->count();
+
+        $pendingWholesale = Order::where('order_type', 'wholesale')
+            ->whereIn('status', $openStatuses)
+            ->whereHas('items', fn($iq) => $iq->where('backorder_qty', '>', 0))
+            ->count();
+
+        return view('admin.orders.index', compact(
+            'orders',
+            'methods',
+            'pstatuses',
+            'statuses',
+            'pageTotal',
+            'filterTotal',
+            'pendingRetail',
+            'pendingWholesale'
+        ));
     }
+
 
     // Detalle
     public function show(Order $order)
@@ -224,5 +260,62 @@ class OrderController extends Controller
         }, $filename, [
             'Content-Type' => 'text/csv; charset=UTF-8',
         ]);
+    }
+    public function updatePriority(Request $request, Order $order)
+    {
+        $data = $request->validate([
+            'is_priority'    => 'nullable|in:0,1',
+            'priority_level' => 'nullable|integer|min:0|max:99',
+            'action'         => 'nullable|in:raise,lower,toggle',
+        ]);
+
+        if (!empty($data['action'])) {
+            switch ($data['action']) {
+                case 'raise':
+                    $order->is_priority = true;
+                    $order->priority_level = max((int)$order->priority_level, 1) + 1;
+                    break;
+
+                case 'lower':
+                    $order->priority_level = max((int)$order->priority_level - 1, 0);
+                    if ($order->priority_level === 0) {
+                        $order->is_priority = false;
+                    }
+                    break;
+
+                case 'toggle':
+                    $order->is_priority = !$order->is_priority;
+                    if ($order->is_priority) {
+                        // Si se enciende y estaba en 0, dale un valor por defecto
+                        if ((int)$order->priority_level === 0) {
+                            $order->priority_level = 10;
+                        }
+                    } else {
+                        // ✅ Apagando prioridad: nivel a 0 para que el input refleje el cambio
+                        $order->priority_level = 0;
+                    }
+                    break;
+            }
+
+            $order->save();
+            // ✅ Redirige al show para evitar cache del form y ver el valor ya actualizado
+            return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad actualizada.');
+        }
+
+        // Guardado por formulario normal
+        if (array_key_exists('is_priority', $data)) {
+            $order->is_priority = (bool)((int)$data['is_priority']);
+        }
+        if (array_key_exists('priority_level', $data) && $data['priority_level'] !== null) {
+            $order->priority_level = (int)$data['priority_level'];
+            if ($order->priority_level > 0) {
+                $order->is_priority = true;
+            } else {
+                $order->is_priority = false;
+            }
+        }
+
+        $order->save();
+        return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad guardada.');
     }
 }

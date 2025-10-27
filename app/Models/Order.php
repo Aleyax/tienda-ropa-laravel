@@ -7,8 +7,10 @@ use Illuminate\Database\Eloquent\Model;
 class Order extends Model
 {
     protected $fillable = ['user_id', 'payment_method', 'payment_status', 'status', 'subtotal', 'tax', 'total', 'cod_details', 'voucher_url', 'paid_at'];
-    protected $casts = ['cod_details' => 'array', 'subtotal' => 'float', 'tax' => 'float', 'total' => 'float', 'paid_at' => 'datetime'];
-
+    protected $casts = [
+        'is_priority'    => 'boolean',
+        'priority_level' => 'integer',
+    ];
     public function items()
     {
         return $this->hasMany(OrderItem::class);
@@ -33,4 +35,16 @@ class Order extends Model
     {
         return $this->belongsTo(ShippingRate::class);
     }
+    public function scopeType($q, ?string $type)
+    {
+        if ($type === 'retail' || $type === 'wholesale') {
+            $q->where('order_type', $type);
+        }
+        return $q;
+    }
+    public function scopePendingPicking($q)
+    {
+        return $q->whereHas('items', fn($iq) => $iq->where('backorder_qty', '>', 0));
+    }
+    
 }

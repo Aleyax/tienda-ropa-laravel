@@ -126,6 +126,67 @@
         <button class="bg-gray-800 text-white px-3 rounded">Guardar</button>
       </form>
     </div>
+    {{-- Prioridad de atención --}}
+    <div class="border rounded p-3">
+      <div class="font-semibold mb-2">Prioridad de atención</div>
+
+      <div class="mb-2">
+        @if($order->is_priority)
+        <span class="text-xs px-2 py-1 rounded bg-amber-200 text-amber-800">
+          Prioritario ({{ (int)$order->priority_level }})
+        </span>
+        @else
+        <span class="text-xs px-2 py-1 rounded bg-gray-200 text-gray-700">
+          Sin prioridad
+        </span>
+        @endif
+      </div>
+
+      @can('orders.update')
+      <form method="POST" action="{{ route('admin.orders.priority', $order) }}" class="space-y-2">
+        @csrf
+
+        <div class="flex items-center gap-2">
+          <label class="text-sm">Prioritario</label>
+          <select name="is_priority" class="border p-1">
+            <option value="0" @selected(!$order->is_priority)>No</option>
+            <option value="1" @selected($order->is_priority)>Sí</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <label class="text-sm">Nivel</label>
+          <input type="number" name="priority_level" min="0" max="99" class="border p-1 w-24"
+            value="{{ (int)$order->priority_level }}">
+          <span class="text-xs text-gray-500">0 = sin prioridad</span>
+        </div>
+
+        <div class="flex gap-2">
+          <button class="bg-gray-800 text-white px-3 rounded text-sm">Guardar</button>
+        </div>
+      </form>
+
+      <div class="flex gap-2 mt-2">
+        <form method="POST" action="{{ route('admin.orders.priority', $order) }}">
+          @csrf
+          <input type="hidden" name="action" value="raise">
+          <button class="bg-amber-600 text-white px-3 rounded text-sm">Subir +1</button>
+        </form>
+        <form method="POST" action="{{ route('admin.orders.priority', $order) }}">
+          @csrf
+          <input type="hidden" name="action" value="lower">
+          <button class="bg-amber-200 text-amber-900 px-3 rounded text-sm">Bajar -1</button>
+        </form>
+        <form method="POST" action="{{ route('admin.orders.priority', $order) }}">
+          @csrf
+          <input type="hidden" name="action" value="toggle">
+          <button class="bg-gray-200 text-gray-900 px-3 rounded text-sm">
+            {{ $order->is_priority ? 'Quitar prioridad' : 'Marcar prioritario' }}
+          </button>
+        </form>
+      </div>
+      @endcan
+    </div>
 
     {{-- ===== Bloque: Liquidación de envío ===== --}}
     <div class="border rounded p-3">

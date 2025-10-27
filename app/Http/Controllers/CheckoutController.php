@@ -197,7 +197,7 @@ class CheckoutController extends Controller
                         }
                     }
                 }
-
+                $orderType = ($user?->isWholesale() ?? false) ? 'wholesale' : 'retail';
                 // 4) Crear orden (igual para ambos; la diferencia está en ítems y stock)
                 $order = Order::create([
                     'user_id'                    => $user->id,
@@ -220,6 +220,9 @@ class CheckoutController extends Controller
                     'status'                     => 'new',
                     'payment_method'             => $data['payment_method'],
                     'payment_status'             => $data['payment_method'] === 'online' ? 'authorized' : 'unpaid',
+                    'order_type'     => $orderType,
+                    'is_priority'    => $orderType === 'retail',   // retail prioritario
+                    'priority_level' => $orderType === 'retail' ? 10 : 0,
                 ]);
 
                 /*

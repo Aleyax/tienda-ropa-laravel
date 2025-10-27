@@ -93,6 +93,10 @@ Route::middleware(['auth'])
     ->group(function () {
 
 
+        Route::post('/orders/{order}/priority', [OrderController::class, 'updatePriority'])
+            ->middleware('permission:orders.update')
+            ->name('orders.priority');
+
         Route::post('/orders/{order}/items/{item}/pick', [OrderController::class, 'pickItem'])
             ->middleware('permission:orders.update')
             ->name('orders.items.pick');
