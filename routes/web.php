@@ -92,11 +92,22 @@ Route::middleware(['auth'])
     ->prefix('admin')->name('admin.')
     ->group(function () {
 
+        Route::get('/pick-baskets', [\App\Http\Controllers\Admin\PickBasketController::class, 'index'])
+            ->name('pick_baskets.index');
 
+        Route::get('/pick-baskets/create', [\App\Http\Controllers\Admin\PickBasketController::class, 'create'])
+            ->name('pick_baskets.create');
+
+        Route::post('/pick-baskets', [\App\Http\Controllers\Admin\PickBasketController::class, 'store'])
+            ->name('pick_baskets.store');
+
+        Route::get('/pick-baskets/{basket}', [\App\Http\Controllers\Admin\PickBasketController::class, 'show'])
+            ->name('pick_baskets.show');
         Route::post('/orders/{order}/priority', [OrderController::class, 'updatePriority'])
             ->middleware('permission:orders.update')
             ->name('orders.priority');
 
+            
         Route::post('/orders/{order}/items/{item}/pick', [OrderController::class, 'pickItem'])
             ->middleware('permission:orders.update')
             ->name('orders.items.pick');

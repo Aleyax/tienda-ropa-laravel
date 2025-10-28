@@ -7,19 +7,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Warehouse extends Model
 {
-    protected $fillable = [
-        'name',
-        'code',
-        'location',
-        'is_active',
-    ];
+    protected $fillable = ['name','code','is_active','address'];
 
-    protected $casts = [
-        'is_active' => 'boolean',
-    ];
-
-    public function pickBaskets(): HasMany
+    public function stocks(): HasMany
     {
-        return $this->hasMany(PickBasket::class, 'warehouse_id');
+        return $this->hasMany(WarehouseStock::class);
     }
 }
