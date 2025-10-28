@@ -105,11 +105,11 @@ class CheckoutController extends Controller
 
     public function place(Request $request, PricingService $pricing)
     {
-        try {
-            return DB::transaction(function () use ($request, $pricing) {
+        /** @var \App\Models\User|null $user */
+        $user = Auth::user();
 
-                /** @var User $user */
-                $user = Auth::user();
+        try {
+            return DB::transaction(function () use ($request, $pricing, $user) {
 
                 // 1) Recalcular carrito
                 $cart = session('cart', []);
@@ -127,7 +127,7 @@ class CheckoutController extends Controller
                         ? $pricing->priceForWithSource($user, $product, $variant->id)
                         : [$pricing->priceFor($user, $product, $variant->id)];
 
-                    $qty     = (int)($line['qty'] ?? 1);
+                    $qty     = (int)$line['qty'];
                     $amount  = $price * $qty;
                     $subtotal += $amount;
 
@@ -179,50 +179,43 @@ class CheckoutController extends Controller
                 }
 
                 $grandTotal = round($total + $shippingAmount, 2);
-                // ---- Reglas de mayorista: mínimos de compra ----
 
+                // 4) REGLAS MAYORISTA (first order min y min unidades por ítem)
                 $isWholesale = $user?->isWholesale() ?? false;
 
                 if ($isWholesale) {
-                    // ¿Es primer pedido no cancelado del usuario?
+                    // ¿Es primer pedido no cancelado?
                     $ordersCount = Order::where('user_id', $user->id)
                         ->where('status', '!=', 'cancelled')
                         ->count();
 
-                    // Mínimo para primera compra (S/160 por defecto)
-                    $minFirst = (float) Setting::getValue('wholesale_first_order_min', 160.00);
+                    // a) Mínimo para primera compra: Setting 'wholesale_first_order_min' (default 160.00)
+                    $minFirst = (float) \App\Models\Setting::getValue('wholesale_first_order_min', 160.00);
                     if ($ordersCount === 0 && $grandTotal < $minFirst) {
                         return redirect()->route('cart.index')
                             ->with('error', 'Tu primera compra mayorista debe ser al menos S/ ' . number_format($minFirst, 2) . '.');
                     }
 
-                    // (Opcional) Mínimo para cada compra mayorista
-                    $minEvery = (float) Setting::getValue('wholesale_every_order_min', 0);
-                    if ($minEvery > 0 && $grandTotal < $minEvery) {
-                        return redirect()->route('cart.index')
-                            ->with('error', 'Cada compra mayorista debe ser al menos S/ ' . number_format($minEvery, 2) . '.');
-                    }
-                }
-                // ---- fin reglas mayorista ----
-                // 3.5) Regla Mayorista: mínimo de primera compra
-                $isWholesale = method_exists($user, 'isWholesale') ? ($user->isWholesale() ?? false) : false;
-
-                if ($isWholesale) {
-                    $ordersCount = Order::where('user_id', $user->id)
-                        ->where('status', '!=', 'cancelled')
-                        ->count();
-
-                    if ($ordersCount === 0) {
-                        $min = (float) Setting::getValue('wholesale_first_order_min', 160.00);
-                        if ($grandTotal < $min) {
-                            throw new \RuntimeException(
-                                'Tu primera compra mayorista debe ser al menos S/ ' . number_format($min, 2) . '.'
-                            );
+                    // b) Mínimo por ítem desde la segunda compra (o si admin lo exige siempre):
+                    // Setting 'wholesale_min_units_per_item' (default 3). Si quieres aplicarlo sólo después de la primera, mantenlo así.
+                    $minUnitsCart = (int) \App\Models\Setting::getValue('wholesale_min_units_cart', 3);
+                    if ($minUnitsCart > 0 && $ordersCount > 0) {
+                        $totalUnits = 0;
+                        foreach ($lines as $l) {
+                            $totalUnits += (int) $l['qty'];
+                        }
+                        if ($totalUnits < $minUnitsCart) {
+                            return redirect()->route('cart.index')
+                                ->with('error', "Cada compra mayorista debe tener al menos {$minUnitsCart} unidades en total (actual: {$totalUnits}).");
                         }
                     }
+
+                    // (Opcional) Si quieres exigir un mínimo por pedido SIEMPRE (no solo primera compra):
+                    // $minEvery = (float) \App\Models\Setting::getValue('wholesale_every_order_min', 0);
+                    // if ($minEvery > 0 && $grandTotal < $minEvery) { ... }
                 }
-                $orderType = ($user?->isWholesale() ?? false) ? 'wholesale' : 'retail';
-                // 4) Crear orden (igual para ambos; la diferencia está en ítems y stock)
+
+                // 5) Crear orden
                 $order = Order::create([
                     'user_id'                    => $user->id,
                     'subtotal'                   => $subtotal,
@@ -244,34 +237,27 @@ class CheckoutController extends Controller
                     'status'                     => 'new',
                     'payment_method'             => $data['payment_method'],
                     'payment_status'             => $data['payment_method'] === 'online' ? 'authorized' : 'unpaid',
-                    'order_type'     => $orderType,
-                    'is_priority'    => $orderType === 'retail',   // retail prioritario
-                    'priority_level' => $orderType === 'retail' ? 10 : 0,
                 ]);
 
-                /*
-                 * 5) RAMA DE CUMPLIMIENTO
-                 * - Retail (minorista): stock duro (lock + decrement).
-                 * - Wholesale (mayorista): NO descuenta stock; registra backorder_qty.
-                 */
+                // 6) Ítems y stock según modo (retail = descuenta stock, wholesale = backorder)
                 if ($isWholesale) {
-                    // Mayorista: NO tocar stock; solo crear ítems con backorder_qty
+                    // Mayorista: NO tocar stock; ítems en backorder
                     foreach ($lines as $l) {
-                        $variant = $l['variant']; // NO lock, NO decrement
+                        $variant = $l['variant']; // no lock
                         OrderItem::create([
-                            'order_id'       => $order->id,
-                            'product_id'     => $l['product']->id,
-                            'variant_id'     => $variant->id,
-                            'name'           => $l['product']->name,
-                            'sku'            => $variant->sku,
-                            'unit_price'     => $l['price'],
-                            'qty'            => $l['qty'],           // lo pedido
-                            'backorder_qty'  => $l['qty'],           // todo queda pendiente
-                            'amount'         => $l['amount'],
+                            'order_id'      => $order->id,
+                            'product_id'    => $l['product']->id,
+                            'variant_id'    => $variant->id,
+                            'name'          => $l['product']->name,
+                            'sku'           => $variant->sku,
+                            'qty'           => $l['qty'],
+                            'backorder_qty' => $l['qty'],
+                            'unit_price'    => $l['price'],
+                            'amount'        => $l['amount'],
                         ]);
                     }
                 } else {
-                    // Minorista: stock duro con lock
+                    // Minorista: stock duro
                     foreach ($lines as $l) {
                         $locked = ProductVariant::where('id', $l['variant']->id)->lockForUpdate()->first();
                         if ($locked->stock < $l['qty']) {
@@ -280,20 +266,20 @@ class CheckoutController extends Controller
                         $locked->decrement('stock', $l['qty']);
 
                         OrderItem::create([
-                            'order_id'       => $order->id,
-                            'product_id'     => $l['product']->id,
-                            'variant_id'     => $locked->id,
-                            'name'           => $l['product']->name,
-                            'sku'            => $locked->sku,
-                            'unit_price'     => $l['price'],
-                            'qty'            => $l['qty'],
-                            'backorder_qty'  => 0,                   // retail no deja pendientes
-                            'amount'         => $l['amount'],
+                            'order_id'      => $order->id,
+                            'product_id'    => $l['product']->id,
+                            'variant_id'    => $locked->id,
+                            'name'          => $l['product']->name,
+                            'sku'           => $variant->sku,
+                            'qty'           => $l['qty'],
+                            'backorder_qty' => 0,
+                            'unit_price'    => $l['price'],
+                            'amount'        => $l['amount'],
                         ]);
                     }
                 }
 
-                // 6) Registrar pago inicial
+                // 7) Pago inicial
                 OrderPayment::create([
                     'order_id' => $order->id,
                     'method'   => $data['payment_method'],
@@ -303,7 +289,7 @@ class CheckoutController extends Controller
                     'notes'    => $data['payment_method'] === 'cod' ? ($request->input('cod_pay_type') ?? null) : null,
                 ]);
 
-                // 7) Limpiar carrito y terminar
+                // 8) Vaciar carrito y redirigir
                 session()->forget('cart');
                 return redirect()->route('checkout.thanks', $order)->with('success', 'Pedido creado correctamente.');
             });
@@ -314,6 +300,7 @@ class CheckoutController extends Controller
             return redirect()->route('cart.index')->with('error', 'Ocurrió un error al confirmar. Intenta nuevamente.');
         }
     }
+
 
     public function uploadVoucher(Request $request)
     {

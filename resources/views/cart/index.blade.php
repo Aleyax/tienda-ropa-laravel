@@ -14,11 +14,16 @@
         @endif
 
         {{-- Banner modo mayorista --}}
-        @if(!empty($isWholesale) && $isWholesale)
-            <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm">
-                Modo mayorista activo: puedes añadir cantidades aunque no haya stock inmediato.
-                Los ítems sin stock se registrarán como <strong>backorder</strong>.
-            </div>
+        @if($isWholesale)
+            @if(isset($ordersCount) && $ordersCount === 0)
+                <div class="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded text-sm mt-2">
+                    Primera compra mayorista: mínimo S/ {{ number_format($minFirst, 2) }}.
+                </div>
+            @else
+                <div class="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded text-sm mt-2">
+                    Regla mayorista: mínimo {{ $minUnitsCart }} unidades totales por compra.
+                </div>
+            @endif
         @endif
 
         @if(empty($lines))
@@ -39,9 +44,9 @@
                 <tbody>
                     @foreach($lines as $l)
                         @php
-                            $variant = \App\Models\ProductVariant::with(['product','color','size'])->find($l['variant_id']);
-                            $stock   = (int)($variant->stock ?? 0);
-                            $qty     = (int)$l['qty'];
+                            $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find($l['variant_id']);
+                            $stock = (int) ($variant->stock ?? 0);
+                            $qty = (int) $l['qty'];
                             $inmediato = min($qty, $stock);
                             $backorder = max(0, $qty - $stock);
                         @endphp
@@ -49,7 +54,7 @@
                             <td class="p-2 border">{{ $variant->product->name }}</td>
                             <td class="p-2 border">{{ $variant->color->name }} / {{ $variant->size->code }}</td>
                             <td class="p-2 border">
-                                S/ {{ number_format($l['price'],2) }}
+                                S/ {{ number_format($l['price'], 2) }}
                                 <span class="text-xs text-gray-500">({{ $l['source'] }})</span>
                             </td>
                             <td class="p-2 border">
@@ -57,13 +62,7 @@
                                 <form method="POST" action="{{ route('cart.update') }}" class="flex items-center gap-2">
                                     @csrf
                                     <input type="hidden" name="variant_id" value="{{ $l['variant_id'] }}">
-                                    <input
-                                        type="number"
-                                        name="qty"
-                                        value="{{ $qty }}"
-                                        min="0"
-                                        class="border p-1 w-20"
-                                    >
+                                    <input type="number" name="qty" value="{{ $qty }}" min="0" class="border p-1 w-20">
                                     <button class="bg-gray-800 text-white px-2 py-1 rounded text-sm">Actualizar</button>
                                 </form>
                                 @if(empty($isWholesale) || !$isWholesale)
@@ -98,7 +97,7 @@
                                     @endif
                                 @endif
                             </td>
-                            <td class="p-2 border">S/ {{ number_format($l['amount'],2) }}</td>
+                            <td class="p-2 border">S/ {{ number_format($l['amount'], 2) }}</td>
                             <td class="p-2 border">
                                 <form method="POST" action="{{ route('cart.remove') }}">
                                     @csrf
@@ -112,9 +111,9 @@
             </table>
 
             <div class="text-right space-y-1">
-                <div>Subtotal: <strong>S/ {{ number_format($subtotal,2) }}</strong></div>
-                <div>IGV (18%): <strong>S/ {{ number_format($igv,2) }}</strong></div>
-                <div class="text-xl">Total: <strong>S/ {{ number_format($total,2) }}</strong></div>
+                <div>Subtotal: <strong>S/ {{ number_format($subtotal, 2) }}</strong></div>
+                <div>IGV (18%): <strong>S/ {{ number_format($igv, 2) }}</strong></div>
+                <div class="text-xl">Total: <strong>S/ {{ number_format($total, 2) }}</strong></div>
             </div>
 
             <div class="mt-4 text-right">

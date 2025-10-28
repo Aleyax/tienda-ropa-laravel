@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\User;
+use App\Models\Order;
 use App\Services\PricingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,20 +14,20 @@ class CartController extends Controller
 {
     public function index(PricingService $pricing)
     {
+        $minUnitsCart = (int) \App\Models\Setting::getValue('wholesale_min_units_cart', 3);
         $cart = session()->get('cart', []);
-
+        /** @var \App\Models\User|null $user */
         $user = Auth::user();
-        //$isWholesale = $user?->isWholesale() ?? false;
         $isWholesale = $user instanceof User ? $user->isWholesale() : false;
+
         $lines = [];
         $subtotal = 0;
         foreach ($cart as $line) {
             $product = Product::find($line['product_id']);
             $variant = ProductVariant::find($line['variant_id']);
-
             [$price, $source] = method_exists($pricing, 'priceForWithSource')
-                ? $pricing->priceForWithSource(Auth::user(), $product, optional($variant)->id)
-                : [$pricing->priceFor(Auth::user(), $product, optional($variant)->id), 'auto'];
+                ? $pricing->priceForWithSource($user, $product, optional($variant)->id)
+                : [$pricing->priceFor($user, $product, optional($variant)->id), 'auto'];
 
             $line['price']  = $price;
             $line['source'] = $source;
@@ -34,12 +35,28 @@ class CartController extends Controller
             $subtotal += $line['amount'];
             $lines[] = $line;
         }
-
         $igv   = round($subtotal * 0.18, 2);
         $total = round($subtotal + $igv, 2);
 
-        return view('cart.index', compact('lines', 'subtotal', 'igv', 'total', 'isWholesale'));
+        // (Opcional) Datos para banners
+        $minFirst   = (float) \App\Models\Setting::getValue('wholesale_first_order_min', 160.00);
+        $minUnits   = (int)   \App\Models\Setting::getValue('wholesale_min_units_per_item', 3);
+        $ordersCount = $isWholesale
+            ? Order::where('user_id', $user->id)->where('status', '!=', 'cancelled')->count()
+            : 0;
+
+        return view('cart.index', compact(
+            'lines',
+            'subtotal',
+            'igv',
+            'total',
+            'isWholesale',
+            'minFirst',
+            'ordersCount',
+            'minUnitsCart'
+        ));
     }
+
 
 
     public function add(Request $request)
