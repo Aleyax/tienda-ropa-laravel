@@ -49,7 +49,7 @@ class User extends Authenticatable
     }
     public function group()
     {
-          return $this->belongsTo(CustomerGroup::class, 'group_id');
+        return $this->belongsTo(CustomerGroup::class, 'group_id');
     }
     public function addresses()
     {
@@ -62,5 +62,29 @@ class User extends Authenticatable
     public function isRetail(): bool
     {
         return optional($this->group)->name === 'minorista';
+    }
+    public function pickBasketsResponsible()
+    {
+        return $this->hasMany(\App\Models\PickBasket::class, 'responsible_user_id');
+    }
+
+    public function pickBasketsCreated()
+    {
+        return $this->hasMany(\App\Models\PickBasket::class, 'created_by_user_id');
+    }
+
+    public function outgoingTransfers()
+    {
+        return $this->hasMany(\App\Models\PickBasketTransfer::class, 'from_user_id');
+    }
+
+    public function incomingTransfers()
+    {
+        return $this->hasMany(\App\Models\PickBasketTransfer::class, 'to_user_id');
+    }
+    // app/Models/Warehouse.php
+    public function pickBaskets()
+    {
+        return $this->hasMany(\App\Models\PickBasket::class, 'warehouse_id');
     }
 }
