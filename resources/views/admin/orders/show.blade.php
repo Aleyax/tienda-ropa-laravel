@@ -5,11 +5,8 @@
 @section('content')
 
 @php
-    // --- Variables de contexto seguras (si el controlador no las envía) ---
     $meId   = (int)($meId ?? auth()->id() ?? 0);
-
-    $basket = $basket
-        ?? \App\Models\PickBasket::where('order_id', $order->id)->latest()->first();
+    $basket = $basket ?? \App\Models\PickBasket::where('order_id', $order->id)->latest()->first();
 
     $activeUsers = $activeUsers
         ?? \App\Models\User::query()
@@ -22,15 +19,18 @@
         ? $basket->transfers()->where('status','pending')->exists()
         : false;
 
-    // Solo-lectura si no hay canasta, o no está open, o no soy responsable, o hay transferencia pendiente
+    // <<< CAMBIO CLAVE: estados editables
+    $editableStatuses = ['open', 'in_progress'];
+
+    // Solo-lectura si: no hay canasta, o estado no editable, o no soy responsable, o hay transferencia pendiente
     $readOnly = !$basket
-        || $basket->status !== 'open'
+        || !in_array($basket->status, $editableStatuses, true)
         || (int)$basket->responsible_user_id !== $meId
         || $hasPendingTransfer;
 
-    // Puedo transferir solo si está open, soy responsable y no hay pendiente
+    // Puedo transferir si: hay canasta, estado editable, soy responsable y no hay transferencia pendiente
     $canTransfer = $basket
-        && $basket->status === 'open'
+        && in_array($basket->status, $editableStatuses, true)
         && (int)$basket->responsible_user_id === $meId
         && !$hasPendingTransfer;
 
@@ -40,6 +40,7 @@
         'email' => $u->email,
     ]))->values();
 @endphp
+
 
 <div class="grid md:grid-cols-3 gap-4">
   {{-- ====== Columna izquierda (2/3) ====== --}}
@@ -119,12 +120,13 @@
           </form>
 
           {{-- Cerrar canasta: solo si soy responsable y está open --}}
-          @if(!$readOnly && $basket->status !== 'closed')
+          @if(!$readOnly && in_array($basket->status, ['open','in_progress'], true))
             <form method="POST" action="{{ route('admin.baskets.close', $basket) }}">
               @csrf
               <button class="px-3 py-1 rounded border bg-gray-800 text-white">Cerrar canasta</button>
             </form>
           @endif
+
 
           @if(!$canTransfer)
             <div class="text-xs text-gray-500">

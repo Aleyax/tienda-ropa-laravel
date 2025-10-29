@@ -201,7 +201,7 @@ class PickBasketController extends Controller
             ->get(['id', 'name', 'email']);
 
         // No permitir sugerirme a mí mismo
-    $me = (int) Auth::id();
+        $me = (int) Auth::id();
         $users = $users->reject(fn($u) => (int)$u->id === $me)->values();
 
         return response()->json($users);
