@@ -8,7 +8,9 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Models\ProductVariant;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use App\Models\OrderItem;
+use Illuminate\Support\Facades\Schema;
 
 class OrderController extends Controller
 {
@@ -83,13 +85,65 @@ class OrderController extends Controller
     // Detalle
     public function show(Order $order)
     {
-        $order->load(['items' => function ($q) {
-            $q->with(['order']);
-        }, 'user', 'payments']);
-        // (Opcional) eager para variant/product si quieres:
-        $order->load(['items' => fn($q) => $q->with(['order'])]);
-        return view('admin.orders.show', compact('order'));
+        // Eager loading básico
+        $order->load([
+            'user',
+            'payments',
+            'items' => function ($q) {
+                // si tus OrderItem tienen relaciones, puedes agregarlas aquí
+                $q->with(['order']);
+            },
+        ]);
+
+        // Canasta de picking asociada (la más reciente)
+        $basket = \App\Models\PickBasket::where('order_id', $order->id)
+            ->latest()
+            ->first();
+        // Usuario actual
+        $me = Auth::user();
+
+
+        // Listado de usuarios activos (si existe is_active) y distintos a mí
+        $activeUsers = \App\Models\User::query()
+            ->when(Schema::hasColumn('users', 'is_active'), fn($q) => $q->where('is_active', 1))
+            ->where('id', '!=', $me?->id)   // por si $me es null
+            ->orderBy('name')
+            ->get(['id', 'name', 'email']);
+
+
+        // ¿Hay transferencia pendiente sobre la canasta?
+        $hasPendingTransfer = $basket
+            ? $basket->transfers()->where('status', 'pending')->exists()
+            : false;
+
+        // ¿Puedo derivar? -> debo ser responsable, canasta abierta y sin transferencia pendiente
+        $canTransfer = $basket
+            && $basket->status === 'open'
+            && (int) $basket->responsible_user_id === (int) ($me?->id ?? 0)
+            && !$hasPendingTransfer;
+
+        // Solo lectura si no soy responsable (o no hay canasta)
+        $readOnly = !$basket || (int) $basket->responsible_user_id !== (int) ($me?->id ?? 0);
+        $meId = (int) ($me?->id ?? 0);
+        // Para el autocompletado en el Blade
+        $jsUsers = $activeUsers->map(fn($u) => [
+            'id'    => $u->id,
+            'name'  => $u->name,
+            'email' => $u->email,
+        ]);
+
+        return view('admin.orders.show', compact(
+            'order',
+            'basket',
+            'activeUsers',
+            'canTransfer',
+            'readOnly',
+            'jsUsers',
+            'meId'
+
+        ));
     }
+
 
     // Cambiar estado del pedido
     public function updateStatus(Request $request, Order $order)

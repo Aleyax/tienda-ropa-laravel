@@ -8,7 +8,7 @@ use App\Http\Controllers\CatalogController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\AddressController;
-
+use App\Http\Controllers\Admin\PickBasketController;
 // Admin
 use App\Http\Controllers\Admin\AdminOrderController;
 use App\Http\Controllers\Admin\ProductController;
@@ -92,22 +92,54 @@ Route::middleware(['auth'])
     ->prefix('admin')->name('admin.')
     ->group(function () {
 
-        Route::get('/pick-baskets', [\App\Http\Controllers\Admin\PickBasketController::class, 'index'])
-            ->name('pick_baskets.index');
+        // routes/web.php (dentro del grupo admin)
 
-        Route::get('/pick-baskets/create', [\App\Http\Controllers\Admin\PickBasketController::class, 'create'])
-            ->name('pick_baskets.create');
 
-        Route::post('/pick-baskets', [\App\Http\Controllers\Admin\PickBasketController::class, 'store'])
-            ->name('pick_baskets.store');
+        Route::post('/orders/{order}/basket/open',   [PickBasketController::class, 'open'])
+            ->middleware('permission:orders.update')
+            ->name('orders.basket.open');
 
-        Route::get('/pick-baskets/{basket}', [\App\Http\Controllers\Admin\PickBasketController::class, 'show'])
-            ->name('pick_baskets.show');
+        Route::post('/baskets/{basket}/pick',       [PickBasketController::class, 'pick'])
+            ->middleware('permission:orders.update')
+            ->name('baskets.pick');
+
+        Route::post('/baskets/{basket}/unpick',     [PickBasketController::class, 'unpick'])
+            ->middleware('permission:orders.update')
+            ->name('baskets.unpick');
+
+        Route::post('/baskets/{basket}/close',      [PickBasketController::class, 'close'])
+            ->middleware('permission:orders.update')
+            ->name('baskets.close');
+
+        // Transferencias de canasta
+        Route::post('/baskets/{basket}/transfer',   [PickBasketController::class, 'transferCreate'])
+            ->middleware('permission:orders.update')
+            ->name('baskets.transfer.create');
+
+        Route::post('/basket-transfers/{transfer}/accept', [PickBasketController::class, 'transferAccept'])
+            ->middleware('permission:orders.update')
+            ->name('baskets.transfer.accept');
+
+        Route::post('/basket-transfers/{transfer}/decline', [PickBasketController::class, 'transferDecline'])
+            ->middleware('permission:orders.update')
+            ->name('baskets.transfer.decline');
+
+        Route::post('/basket-transfers/{transfer}/cancel', [PickBasketController::class, 'transferCancel'])
+            ->middleware('permission:orders.update')
+            ->name('baskets.transfer.cancel');
+
+        // Búsqueda de usuarios activos para transferir canastas (autocomplete)
+        Route::get('/users/search', [PickBasketController::class, 'userLookup'])
+            ->middleware('permission:orders.update')
+            ->name('users.search');
+
+
+
         Route::post('/orders/{order}/priority', [OrderController::class, 'updatePriority'])
             ->middleware('permission:orders.update')
             ->name('orders.priority');
 
-            
+
         Route::post('/orders/{order}/items/{item}/pick', [OrderController::class, 'pickItem'])
             ->middleware('permission:orders.update')
             ->name('orders.items.pick');

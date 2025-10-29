@@ -20,6 +20,19 @@ class PickBasketTransfer extends Model
         'decided_at' => 'datetime',
     ];
 
+    public function basket()
+    {
+        return $this->belongsTo(\App\Models\PickBasket::class, 'pick_basket_id');
+    }
+    public function from()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'from_user_id');
+    }
+    public function to()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'to_user_id');
+    }
+
     // Relaciones
     public function pickBasket(): BelongsTo
     {

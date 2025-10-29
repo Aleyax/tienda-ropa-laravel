@@ -84,4 +84,9 @@ class PickBasket extends Model
         $this->responsible_user_id = $user->id;
         $this->save();
     }
+
+    public function creator()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'created_by_user_id');
+    }
 }
