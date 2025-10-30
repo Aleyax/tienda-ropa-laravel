@@ -14,6 +14,31 @@ use Illuminate\Support\Facades\Schema;
 
 class PickBasketController extends Controller
 {
+    public function transfersIndex(Request $request)
+    {
+        $user = Auth::user();
+
+        $query = \App\Models\PickBasketTransfer::with(['basket.order', 'fromUser', 'toUser'])
+            ->latest();
+
+        // Por defecto muestro las que me han enviado a mí y están pendientes
+        $mine = $request->boolean('mine', true);
+        if ($mine) {
+            $query->where('to_user_id', $user->id);
+        } else {
+            $query->where('from_user_id', $user->id);
+        }
+
+        $status = $request->get('status', 'pending');
+        if ($status !== '') {
+            $query->where('status', $status);
+        }
+
+        $transfers = $query->paginate(15);
+
+        return view('admin.baskets.transfers.index', compact('transfers'));
+    }
+
     // Crear / abrir canasta para el pedido y asignarme como responsable (si no hay)
     public function open(Request $request, Order $order)
     {
