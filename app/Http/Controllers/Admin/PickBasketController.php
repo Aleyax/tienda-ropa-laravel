@@ -282,4 +282,25 @@ class PickBasketController extends Controller
 
         return back()->with('success', 'Transferencia creada. Pendiente de aceptación.');
     }
+    // app/Http/Controllers/Admin/PickBasketController.php
+    public function myBaskets()
+    {
+        $me = Auth::id();
+        //$me = auth()->id();
+        // Canastas donde soy responsable y aún no cierran
+        $myOpenBaskets = \App\Models\PickBasket::with(['order.user'])
+            ->where('responsible_user_id', $me)
+            ->whereIn('status', ['open', 'in_progress'])
+            ->latest('updated_at')
+            ->get();
+
+        // Transferencias pendientes para mí
+        $pendingTransfers = \App\Models\PickBasketTransfer::with(['basket.order.user', 'fromUser'])
+            ->where('to_user_id', $me)
+            ->where('status', 'pending')
+            ->latest()
+            ->get();
+
+        return view('admin.baskets.mine', compact('myOpenBaskets', 'pendingTransfers'));
+    }
 }

@@ -27,6 +27,31 @@ Route::middleware(['auth', 'permission:settings.update'])
         Route::put('/settings', [\App\Http\Controllers\Admin\SettingController::class, 'update'])->name('settings.update');
     });
 
+// routes/web.php
+
+Route::prefix('admin')
+    ->name('admin.')
+    ->middleware(['auth', 'role:admin|vendedor'])   // <- aquí
+    ->group(function () {
+
+        Route::get('/baskets/mine', [PickBasketController::class, 'myBaskets'])
+            ->name('baskets.mine');
+
+        Route::get('/baskets/transfers', [PickBasketController::class, 'index'])
+            ->name('baskets.transfers');
+
+        // (si tienes más rutas de canastas/transfers que deban ser privadas)
+        Route::post('/baskets/{basket}/transfer', [PickBasketController::class, 'transferCreate'])
+            ->name('baskets.transfer.create');
+        Route::post('/transfers/{transfer}/accept', [PickBasketController::class, 'transferAccept'])
+            ->name('baskets.transfer.accept');
+        Route::post('/transfers/{transfer}/decline', [PickBasketController::class, 'transferDecline'])
+            ->name('baskets.transfer.decline');
+        Route::post('/transfers/{transfer}/cancel', [PickBasketController::class, 'transferCancel'])
+            ->name('baskets.transfer.cancel');
+    });
+
+
 /*
 |--------------------------------------------------------------------------
 | Catálogo / Carrito / Precios demo
