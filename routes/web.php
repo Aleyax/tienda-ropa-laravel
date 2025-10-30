@@ -95,7 +95,7 @@ Route::middleware(['auth'])
         // routes/web.php (dentro del grupo admin)
 
         Route::get('/baskets/transfers', [PickBasketController::class, 'transfersIndex'])
-            ->name('admin.baskets.transfers');
+            ->name('baskets.transfers');
 
         Route::post('/orders/{order}/basket/open',   [PickBasketController::class, 'open'])
             ->middleware('permission:orders.update')
