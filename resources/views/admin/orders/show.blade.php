@@ -5,6 +5,26 @@
 @section('content')
 
     @php
+
+        $payColors = [
+            'paid' => 'bg-green-100 text-green-800',
+            'partially_paid' => 'bg-amber-100 text-amber-800',
+            'pending_confirmation' => 'bg-yellow-100 text-yellow-800',
+            'authorized' => 'bg-blue-100 text-blue-800',
+            'cod_promised' => 'bg-purple-100 text-purple-800',
+            'failed' => 'bg-red-100 text-red-800',
+            'unpaid' => 'bg-gray-100 text-gray-800',
+        ];
+        $statusClasses = [
+            'new' => 'bg-gray-100 text-gray-800',
+            'confirmed' => 'bg-blue-100 text-blue-800',
+            'preparing' => 'bg-indigo-100 text-indigo-800',
+            'shipped' => 'bg-cyan-100 text-cyan-800',
+            'delivered' => 'bg-green-100 text-green-800',
+            'cancelled' => 'bg-red-100 text-red-800',
+        ];
+        $statusClass = $statusClasses[$order->status] ?? 'bg-gray-100 text-gray-800';
+        $payClass = $payColors[$order->payment_status] ?? 'bg-gray-100 text-gray-800';
         $meId = (int) ($meId ?? (auth()->id() ?? 0));
         $basket = $basket ?? \App\Models\PickBasket::where('order_id', $order->id)->latest()->first();
 
@@ -58,8 +78,26 @@
                     <div><span class="text-gray-500">Cliente:</span> {{ $order->user?->name ?? 'Invitado' }}</div>
                     <div><span class="text-gray-500">Email:</span> {{ $order->user?->email }}</div>
                     <div><span class="text-gray-500">Método:</span> {{ $order->payment_method }}</div>
-                    <div><span class="text-gray-500">Pago:</span> <strong>{{ $order->payment_status }}</strong></div>
-                    <div><span class="text-gray-500">Estado:</span> <strong>{{ $order->status }}</strong></div>
+                    <div>
+                        <span class="text-gray-500">Pago:</span>
+                        <span class="px-2 py-0.5 rounded text-xs font-medium {{ $payClass }}">
+                            {{ str_replace('_', ' ', $order->payment_status) }}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500">Estado:</span>
+                        <x-badge :type="match ($order->status) {
+                            'new' => 'gray',
+                            'confirmed' => 'blue',
+                            'preparing' => 'indigo',
+                            'shipped' => 'cyan',
+                            'delivered' => 'green',
+                            'cancelled' => 'red',
+                            default => 'gray',
+                        }" :text="ucfirst($order->status)" />
+
+                    </div>
+
                     <div><span class="text-gray-500">Creado:</span> {{ $order->created_at->format('Y-m-d H:i') }}</div>
                 </div>
                 @if ($order->voucher_url)
@@ -315,7 +353,14 @@
                     </form>
                 @else
                     <div class="text-sm text-gray-600">
-                        Estado de pago: <strong>{{ $order->payment_status }}</strong>
+                        Estado de pago: <x-badge :type="match ($order->payment_status) {
+                            'paid' => 'green',
+                            'pending_confirmation' => 'yellow',
+                            'failed' => 'red',
+                            'partially_paid' => 'amber',
+                            default => 'gray',
+                        }" :text="ucfirst(str_replace('_', ' ', $order->payment_status))" />
+
                     </div>
                 @endif
             </div>
@@ -443,13 +488,16 @@
 
                 <div class="mb-2">
                     @if ($order->is_priority)
-                        <span class="text-xs px-2 py-1 rounded bg-amber-200 text-amber-800">
+                        <span class="text-xs px-2 py-1 rounded bg-amber-200 text-amber-900 font-semibold">
                             Prioritario ({{ (int) $order->priority_level }})
                         </span>
                     @else
-                        <span class="text-xs px-2 py-1 rounded bg-gray-200 text-gray-700">Sin prioridad</span>
+                        <span class="text-xs px-2 py-1 rounded bg-gray-200 text-gray-700">
+                            Sin prioridad
+                        </span>
                     @endif
                 </div>
+
 
                 @if ($canManagePriority)
                     <form method="POST" action="{{ route('admin.orders.priority', $order) }}" class="space-y-2">
