@@ -29,6 +29,14 @@ Route::middleware(['auth', 'permission:settings.update'])
 
 // routes/web.php
 
+Route::prefix('admin/orders')->name('admin.orders.')->group(function () {
+    Route::post('{order}/payments', [App\Http\Controllers\Admin\OrderPaymentController::class, 'store'])
+        ->name('payments.store');
+
+    Route::post('payments/{payment}/status', [App\Http\Controllers\Admin\OrderPaymentController::class, 'updateStatus'])
+        ->name('payments.status');
+});
+
 Route::prefix('admin')
     ->name('admin.')
     ->middleware(['auth', 'role:admin|vendedor'])   // <- aquí

@@ -295,6 +295,96 @@
         <button class="bg-gray-800 text-white px-3 rounded" @disabled($readOnly)>Guardar</button>
       </form>
     </div>
+      <div class="border rounded p-3">
+  <div class="font-semibold mb-2">Registrar nuevo pago</div>
+  <form method="POST" action="{{ route('admin.orders.payments.store', $order) }}" enctype="multipart/form-data" class="space-y-2">
+    @csrf
+    <div>
+      <label class="block text-sm">Método</label>
+      <input type="text" name="method" class="border p-2 w-full" placeholder="Transferencia / Yape / Plin" required>
+    </div>
+    <div>
+      <label class="block text-sm">Monto (S/)</label>
+      <input type="number" step="0.01" name="amount" class="border p-2 w-full" required>
+    </div>
+    <div>
+      <label class="block text-sm">Referencia bancaria</label>
+      <input type="text" name="provider_ref" class="border p-2 w-full">
+    </div>
+    <div>
+      <label class="block text-sm">Comprobante (imagen o PDF)</label>
+      <input type="file" name="evidence" class="border p-2 w-full" accept=".jpg,.jpeg,.png,.pdf">
+    </div>
+    <button class="bg-blue-600 text-white px-3 py-1 rounded">Registrar Pago</button>
+  </form>
+</div>
+{{-- === Pagos registrados === --}}
+@if($order->payments->count())
+  <div class="border rounded p-3 mt-4">
+    <div class="font-semibold mb-2">Pagos registrados</div>
+    <table class="min-w-full bg-white border">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="p-2 border">#</th>
+          <th class="p-2 border">Método</th>
+          <th class="p-2 border">Monto</th>
+          <th class="p-2 border">Referencia</th>
+          <th class="p-2 border">Comprobante</th>
+          <th class="p-2 border">Estado</th>
+          <th class="p-2 border">Registrado por</th>
+          <th class="p-2 border">Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        @foreach($order->payments as $p)
+          <tr>
+            <td class="p-2 border text-center">{{ $p->id }}</td>
+            <td class="p-2 border">{{ $p->method }}</td>
+            <td class="p-2 border text-right">S/ {{ number_format($p->amount, 2) }}</td>
+            <td class="p-2 border text-xs text-gray-600">{{ $p->provider_ref ?? '—' }}</td>
+            <td class="p-2 border text-center">
+              @if($p->evidence_url)
+                <a href="{{ $p->evidence_url }}" target="_blank" class="text-blue-600 underline">Ver</a>
+              @else
+                —
+              @endif
+            </td>
+            <td class="p-2 border">
+              <span class="px-2 py-1 text-xs rounded 
+                @if($p->status === 'paid') bg-green-100 text-green-800
+                @elseif($p->status === 'pending_confirmation') bg-yellow-100 text-yellow-800
+                @elseif($p->status === 'failed') bg-red-100 text-red-800
+                @else bg-gray-100 text-gray-800 @endif">
+                {{ $p->status }}
+              </span>
+            </td>
+            <td class="p-2 border text-sm text-gray-600">
+              {{ $p->collectedBy?->name ?? '—' }}<br>
+              <span class="text-xs">{{ $p->collected_at?->format('d/m/Y H:i') ?? '' }}</span>
+            </td>
+            <td class="p-2 border text-center">
+              @if(auth()->user()->hasAnyRole(['admin', 'vendedor']))
+                <form method="POST" action="{{ route('admin.orders.payments.status', $p) }}">
+                  @csrf
+                  <select name="status" class="border p-1 text-sm">
+                    @foreach(['pending_confirmation','authorized','paid','failed','partially_paid','refunded'] as $status)
+                      <option value="{{ $status }}" @selected($p->status === $status)>
+                        {{ ucfirst(str_replace('_',' ',$status)) }}
+                      </option>
+                    @endforeach
+                  </select>
+                  <button class="ml-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">Actualizar</button>
+                </form>
+              @else
+                <span class="text-xs text-gray-400">Sin permiso</span>
+              @endif
+            </td>
+          </tr>
+        @endforeach
+      </tbody>
+    </table>
+  </div>
+@endif
 
     {{-- Estado pedido --}}
     <div class="border rounded p-3">
