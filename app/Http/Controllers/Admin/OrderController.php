@@ -372,4 +372,60 @@ class OrderController extends Controller
         $order->save();
         return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad guardada.');
     }
+    // app/Http/Controllers/Admin/OrderController.php
+
+    public function payStatus(Request $request, Order $order)
+    {
+
+        /** @var \App\Models\User|\Spatie\Permission\Traits\HasRoles $user */
+        $user = Auth::user();
+
+        abort_unless($user && $user->hasAnyRole(['admin', 'vendedor']), 403);
+        $data = $request->validate([
+            'payment_status' => 'required|string|in:unpaid,pending_confirmation,cod_promised,authorized,paid,failed,partially_paid',
+        ]);
+
+        $order->payment_status = $data['payment_status'];
+        $order->save();
+
+        return back()->with('success', 'Estado de pago actualizado.');
+    }
+
+    public function priority(Request $request, Order $order)
+    {
+        /** @var \App\Models\User|\Spatie\Permission\Traits\HasRoles $user */
+        $user = Auth::user();
+
+        abort_unless($user && $user->hasAnyRole(['admin', 'vendedor']), 403);
+
+        // Soporta tanto editar el nivel como los botones (raise|lower|toggle)
+        $action = $request->string('action')->toString();
+
+        if ($action === 'raise') {
+            $order->is_priority = 1;
+            $order->priority_level = (int)$order->priority_level + 1;
+        } elseif ($action === 'lower') {
+            $order->is_priority = 1;
+            $order->priority_level = max(0, (int)$order->priority_level - 1);
+        } elseif ($action === 'toggle') {
+            $order->is_priority = !$order->is_priority;
+            if (!$order->is_priority) {
+                $order->priority_level = 0;
+            }
+        } else {
+            // Edición normal desde el form
+            $data = $request->validate([
+                'is_priority'     => 'required|boolean',
+                'priority_level'  => 'nullable|integer|min:0|max:99',
+            ]);
+            $order->is_priority = (bool)$data['is_priority'];
+            if (array_key_exists('priority_level', $data)) {
+                $order->priority_level = (int)$data['priority_level'];
+            }
+        }
+
+        $order->save();
+
+        return back()->with('success', 'Prioridad actualizada.');
+    }
 }
