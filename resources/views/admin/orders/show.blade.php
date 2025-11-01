@@ -464,24 +464,7 @@
                                                         </button>
                                                     </form>
                                                 @endif
-                                                @if ($p->evidence_url)
-                                                    <div class="flex items-center gap-2">
-                                                        <a href="{{ $p->evidence_url }}" target="_blank"
-                                                            class="text-blue-600 underline">Ver</a>
-                                                        @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
-                                                            <form method="POST"
-                                                                action="{{ route('admin.orders.payments.deleteEvidence', $p) }}">
-                                                                @csrf @method('DELETE')
-                                                                <button class="text-red-700 text-xs underline"
-                                                                    onclick="return confirm('¿Eliminar comprobante?')">
-                                                                    Quitar comprobante
-                                                                </button>
-                                                            </form>
-                                                        @endif
-                                                    </div>
-                                                @else
-                                                    —
-                                                @endif
+                                                
                                                 <button
                                                     class="ml-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">Actualizar</button>
                                             </form>
