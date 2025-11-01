@@ -8,8 +8,9 @@ class Order extends Model
 {
     protected $fillable = ['user_id', 'payment_method', 'payment_status', 'status', 'subtotal', 'tax', 'total', 'cod_details', 'voucher_url', 'paid_at'];
     protected $casts = [
-        'is_priority'    => 'boolean',
+        'is_priority' => 'boolean',
         'priority_level' => 'integer',
+        'paid_at' => 'datetime',
     ];
     public function items()
     {
@@ -46,5 +47,9 @@ class Order extends Model
     {
         return $q->whereHas('items', fn($iq) => $iq->where('backorder_qty', '>', 0));
     }
-    
+    public function logs()
+    {
+        return $this->hasMany(\App\Models\OrderLog::class)->latest();
+    }
+
 }

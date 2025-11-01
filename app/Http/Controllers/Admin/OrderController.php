@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Support\OrderLogger;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Models\ProductVariant;
@@ -20,13 +21,18 @@ class OrderController extends Controller
         $q = Order::with(['user'])->latest();
 
         // Filtros existentes (método, pago, status)
-        if ($m = $request->string('method')->toString())    $q->where('payment_method', $m);
-        if ($ps = $request->string('pstatus')->toString())  $q->where('payment_status', $ps);
-        if ($s  = $request->string('status')->toString())   $q->where('status', $s);
+        if ($m = $request->string('method')->toString())
+            $q->where('payment_method', $m);
+        if ($ps = $request->string('pstatus')->toString())
+            $q->where('payment_status', $ps);
+        if ($s = $request->string('status')->toString())
+            $q->where('status', $s);
 
         // 🔎 Nuevos filtros
-        if ($from = $request->date('from')) $q->whereDate('created_at', '>=', $from);
-        if ($to   = $request->date('to'))   $q->whereDate('created_at', '<=', $to);
+        if ($from = $request->date('from'))
+            $q->whereDate('created_at', '>=', $from);
+        if ($to = $request->date('to'))
+            $q->whereDate('created_at', '<=', $to);
 
         if ($email = $request->string('email')->toString()) {
             $q->whereHas('user', fn($uq) => $uq->where('email', 'like', "%{$email}%"));
@@ -50,12 +56,12 @@ class OrderController extends Controller
         $orders = $q->paginate(20)->withQueryString();
 
         // Totales
-        $pageTotal   = $orders->sum('total');
+        $pageTotal = $orders->sum('total');
         $filterTotal = (clone $q)->sum('total');
 
-        $methods   = ['transfer', 'cod', 'online'];
+        $methods = ['transfer', 'cod', 'online'];
         $pstatuses = ['unpaid', 'pending_confirmation', 'cod_promised', 'authorized', 'paid', 'failed', 'partially_paid'];
-        $statuses  = ['new', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'];
+        $statuses = ['new', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'];
 
         // 🔢 Banners: conteo de pendientes
         $openStatuses = ['new', 'confirmed', 'preparing'];
@@ -127,8 +133,8 @@ class OrderController extends Controller
         $meId = (int) ($me?->id ?? 0);
         // Para el autocompletado en el Blade
         $jsUsers = $activeUsers->map(fn($u) => [
-            'id'    => $u->id,
-            'name'  => $u->name,
+            'id' => $u->id,
+            'name' => $u->name,
             'email' => $u->email,
         ]);
 
@@ -149,32 +155,130 @@ class OrderController extends Controller
     public function updateStatus(Request $request, Order $order)
     {
         $data = $request->validate([
-            'status' => 'required|in:new,confirmed,preparing,shipped,delivered,cancelled'
+            'status' => 'required|string|in:new,confirmed,preparing,shipped,delivered,cancelled',
+            'note' => 'nullable|string|max:1000',
         ]);
 
-        $order->update(['status' => $data['status']]);
-        return back()->with('success', "Estado de pedido actualizado a {$data['status']}.");
+        // Permisos: responsable o admin
+        $basket = PickBasket::where('order_id', $order->id)->latest()->first();
+        $isAdmin = Auth::user()?->hasAnyRole(['admin']) ?? false;
+        $isResponsible = $basket && in_array($basket->status, ['open', 'in_progress'], true)
+            && (int) $basket->responsible_user_id === (int) Auth::id();
+
+        abort_unless($isAdmin || $isResponsible, 403, 'No autorizado para cambiar el estado del pedido.');
+
+        $target = $data['status'];
+        $current = $order->status;
+
+        // Reglas de transición (evita saltos arbitrarios)
+        $allowed = [
+            'new' => ['confirmed', 'cancelled'],
+            'confirmed' => ['preparing', 'cancelled'],
+            'preparing' => ['shipped', 'cancelled'],
+            'shipped' => ['delivered'],
+            'delivered' => [],                  // terminal
+            'cancelled' => [],                  // terminal
+        ];
+        abort_unless(in_array($target, $allowed[$current] ?? [], true), 422, "Transición inválida de {$current} a {$target}.");
+
+        $old = [
+            'status' => $current,
+            'confirmed_at' => $order->confirmed_at?->toDateTimeString(),
+            'preparing_at' => $order->preparing_at?->toDateTimeString(),
+            'shipped_at' => $order->shipped_at?->toDateTimeString(),
+            'delivered_at' => $order->delivered_at?->toDateTimeString(),
+            'cancelled_at' => $order->cancelled_at?->toDateTimeString(),
+        ];
+
+        DB::transaction(function () use ($order, $basket, $target) {
+            // Cambiar estado y setear timestamps por primer arribo
+            $order->status = $target;
+            match ($target) {
+                'confirmed' => $order->confirmed_at ??= now(),
+                'preparing' => $order->preparing_at ??= now(),
+                'shipped' => $order->shipped_at ??= now(),
+                'delivered' => $order->delivered_at ??= now(),
+                'cancelled' => $order->cancelled_at ??= now(),
+                default => null
+            };
+
+            $order->save();
+
+            // Si se entregó, cerrar canasta si sigue abierta/en progreso
+            if ($basket && $target === 'delivered' && in_array($basket->status, ['open', 'in_progress'], true)) {
+                $basket->status = 'closed';
+                $basket->save();
+            }
+        });
+
+        // Auditoría
+        OrderLogger::log(
+            $order,
+            'update_order_status',
+            $old,
+            [
+                'status' => $order->status,
+                'confirmed_at' => $order->confirmed_at?->toDateTimeString(),
+                'preparing_at' => $order->preparing_at?->toDateTimeString(),
+                'shipped_at' => $order->shipped_at?->toDateTimeString(),
+                'delivered_at' => $order->delivered_at?->toDateTimeString(),
+                'cancelled_at' => $order->cancelled_at?->toDateTimeString(),
+            ],
+            [
+                'route' => 'admin.orders.status',
+                'ip' => $request->ip(),
+                'by' => Auth::id(),
+                'note' => $data['note'] ?? null,
+            ]
+        );
+
+        return back()->with('success', "Estado del pedido actualizado a {$target}.");
     }
+
 
     // Cambiar estado del pago
     public function updatePaymentStatus(Request $request, Order $order)
     {
+        // Solo admin o vendedor pueden cambiar el estado global de pago
+        abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']), 403);
+
         $data = $request->validate([
-            'payment_status' => 'required|in:unpaid,pending_confirmation,cod_promised,authorized,paid,failed,partially_paid'
+            'payment_status' => 'required|in:unpaid,pending_confirmation,cod_promised,authorized,paid,failed,partially_paid',
         ]);
 
-        $order->update([
-            'payment_status' => $data['payment_status'],
-            'paid_at'        => $data['payment_status'] === 'paid' ? now() : null,
-        ]);
+        $old = [
+            'payment_status' => $order->payment_status,
+            'paid_at' => $order->paid_at?->toDateTimeString(),
+        ];
+
+        $order->payment_status = $data['payment_status'];
+        $order->paid_at = $data['payment_status'] === 'paid' ? now() : null;
+        $order->save();
+
+        // Auditoría
+        OrderLogger::log(
+            $order,
+            'update_payment_status',
+            $old,
+            [
+                'payment_status' => $order->payment_status,
+                'paid_at' => $order->paid_at?->toDateTimeString(),
+            ],
+            [
+                'route' => 'admin.orders.paystatus',
+                'ip' => $request->ip(),
+                'by' => Auth::id(),
+            ]
+        );
 
         return back()->with('success', "Estado de pago actualizado a {$data['payment_status']}.");
     }
+
     public function bulkStatus(Request $request)
     {
         $data = $request->validate([
-            'ids'    => 'required|array|min:1',
-            'ids.*'  => 'integer|exists:orders,id',
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'integer|exists:orders,id',
             'status' => 'required|in:new,confirmed,preparing,shipped,delivered,cancelled',
         ]);
 
@@ -184,14 +288,16 @@ class OrderController extends Controller
     public function bulkPayStatus(Request $request)
     {
         $data = $request->validate([
-            'ids'            => 'required|array|min:1',
-            'ids.*'          => 'integer|exists:orders,id',
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'integer|exists:orders,id',
             'payment_status' => 'required|in:unpaid,pending_confirmation,cod_promised,authorized,paid,failed,partially_paid',
         ]);
 
         $update = ['payment_status' => $data['payment_status']];
-        if ($data['payment_status'] === 'paid') $update['paid_at'] = now();
-        else $update['paid_at'] = null;
+        if ($data['payment_status'] === 'paid')
+            $update['paid_at'] = now();
+        else
+            $update['paid_at'] = null;
 
         Order::whereIn('id', $data['ids'])->update($update);
         return back()->with('success', 'Estados de pago actualizados.');
@@ -207,7 +313,7 @@ class OrderController extends Controller
             'qty' => 'required|integer|min:1',
         ]);
 
-        $qtyToPick = (int)$data['qty'];
+        $qtyToPick = (int) $data['qty'];
 
         return DB::transaction(function () use ($order, $item, $qtyToPick) {
             $item->refresh(); // estado más reciente
@@ -249,7 +355,7 @@ class OrderController extends Controller
             'qty' => 'required|integer|min:1',
         ]);
 
-        $qtyToUnpick = (int)$data['qty'];
+        $qtyToUnpick = (int) $data['qty'];
 
         return DB::transaction(function () use ($order, $item, $qtyToUnpick) {
             $variant = ProductVariant::where('id', $item->variant_id)->lockForUpdate()->first();
@@ -277,11 +383,16 @@ class OrderController extends Controller
     {
         // Reutiliza EXACTAMENTE los mismos filtros que index()
         $q = Order::with('user')->latest();
-        if ($m = $request->string('method')->toString())    $q->where('payment_method', $m);
-        if ($ps = $request->string('pstatus')->toString())  $q->where('payment_status', $ps);
-        if ($s = $request->string('status')->toString())    $q->where('status', $s);
-        if ($from = $request->date('from')) $q->whereDate('created_at', '>=', $from);
-        if ($to   = $request->date('to'))   $q->whereDate('created_at', '<=', $to);
+        if ($m = $request->string('method')->toString())
+            $q->where('payment_method', $m);
+        if ($ps = $request->string('pstatus')->toString())
+            $q->where('payment_status', $ps);
+        if ($s = $request->string('status')->toString())
+            $q->where('status', $s);
+        if ($from = $request->date('from'))
+            $q->whereDate('created_at', '>=', $from);
+        if ($to = $request->date('to'))
+            $q->whereDate('created_at', '<=', $to);
         if ($email = $request->string('email')->toString()) {
             $q->whereHas('user', fn($uq) => $uq->where('email', 'like', "%{$email}%"));
         }
@@ -317,21 +428,31 @@ class OrderController extends Controller
     }
     public function updatePriority(Request $request, Order $order)
     {
+        // Solo admin o vendedor pueden cambiar la prioridad
+        abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']), 403);
+
         $data = $request->validate([
-            'is_priority'    => 'nullable|in:0,1',
+            'is_priority' => 'nullable|in:0,1',
             'priority_level' => 'nullable|integer|min:0|max:99',
-            'action'         => 'nullable|in:raise,lower,toggle',
+            'action' => 'nullable|in:raise,lower,toggle',
         ]);
+
+        $old = [
+            'is_priority' => (bool) $order->is_priority,
+            'priority_level' => (int) $order->priority_level,
+        ];
 
         if (!empty($data['action'])) {
             switch ($data['action']) {
                 case 'raise':
                     $order->is_priority = true;
-                    $order->priority_level = max((int)$order->priority_level, 1) + 1;
+                    // si era 0, arranca en 1 y luego suma
+                    $order->priority_level = max((int) $order->priority_level, 1) + 1;
+                    $order->priority_level = min($order->priority_level, 99);
                     break;
 
                 case 'lower':
-                    $order->priority_level = max((int)$order->priority_level - 1, 0);
+                    $order->priority_level = max((int) $order->priority_level - 1, 0);
                     if ($order->priority_level === 0) {
                         $order->is_priority = false;
                     }
@@ -340,38 +461,73 @@ class OrderController extends Controller
                 case 'toggle':
                     $order->is_priority = !$order->is_priority;
                     if ($order->is_priority) {
-                        // Si se enciende y estaba en 0, dale un valor por defecto
-                        if ((int)$order->priority_level === 0) {
+                        // si se enciende y está en 0 dale un valor por defecto
+                        if ((int) $order->priority_level === 0) {
                             $order->priority_level = 10;
                         }
                     } else {
-                        // ✅ Apagando prioridad: nivel a 0 para que el input refleje el cambio
                         $order->priority_level = 0;
                     }
                     break;
             }
 
             $order->save();
-            // ✅ Redirige al show para evitar cache del form y ver el valor ya actualizado
-            return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad actualizada.');
+
+            // Auditoría
+            OrderLogger::log(
+                $order,
+                'update_priority',
+                $old,
+                [
+                    'is_priority' => (bool) $order->is_priority,
+                    'priority_level' => (int) $order->priority_level,
+                ],
+                [
+                    'route' => 'admin.orders.priority',
+                    'action' => $data['action'],
+                    'ip' => $request->ip(),
+                    'by' => Auth::id(),
+                ]
+            );
+
+            return redirect()
+                ->route('admin.orders.show', $order)
+                ->with('success', 'Prioridad actualizada.');
         }
 
         // Guardado por formulario normal
         if (array_key_exists('is_priority', $data)) {
-            $order->is_priority = (bool)((int)$data['is_priority']);
+            $order->is_priority = (bool) ((int) $data['is_priority']);
         }
         if (array_key_exists('priority_level', $data) && $data['priority_level'] !== null) {
-            $order->priority_level = (int)$data['priority_level'];
-            if ($order->priority_level > 0) {
-                $order->is_priority = true;
-            } else {
-                $order->is_priority = false;
-            }
+            $order->priority_level = (int) $data['priority_level'];
+            $order->is_priority = $order->priority_level > 0;
         }
 
         $order->save();
-        return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad guardada.');
+
+        // Auditoría
+        OrderLogger::log(
+            $order,
+            'update_priority',
+            $old,
+            [
+                'is_priority' => (bool) $order->iupdateStatuss_priority,
+                'priority_level' => (int) $order->priority_level,
+            ],
+            [
+                'route' => 'admin.orders.priority',
+                'action' => 'form',
+                'ip' => $request->ip(),
+                'by' => Auth::id(),
+            ]
+        );
+
+        return redirect()
+            ->route('admin.orders.show', $order)
+            ->with('success', 'Prioridad guardada.');
     }
+
     // app/Http/Controllers/Admin/OrderController.php
 
     public function payStatus(Request $request, Order $order)
@@ -403,10 +559,10 @@ class OrderController extends Controller
 
         if ($action === 'raise') {
             $order->is_priority = 1;
-            $order->priority_level = (int)$order->priority_level + 1;
+            $order->priority_level = (int) $order->priority_level + 1;
         } elseif ($action === 'lower') {
             $order->is_priority = 1;
-            $order->priority_level = max(0, (int)$order->priority_level - 1);
+            $order->priority_level = max(0, (int) $order->priority_level - 1);
         } elseif ($action === 'toggle') {
             $order->is_priority = !$order->is_priority;
             if (!$order->is_priority) {
@@ -415,12 +571,12 @@ class OrderController extends Controller
         } else {
             // Edición normal desde el form
             $data = $request->validate([
-                'is_priority'     => 'required|boolean',
-                'priority_level'  => 'nullable|integer|min:0|max:99',
+                'is_priority' => 'required|boolean',
+                'priority_level' => 'nullable|integer|min:0|max:99',
             ]);
-            $order->is_priority = (bool)$data['is_priority'];
+            $order->is_priority = (bool) $data['is_priority'];
             if (array_key_exists('priority_level', $data)) {
-                $order->priority_level = (int)$data['priority_level'];
+                $order->priority_level = (int) $data['priority_level'];
             }
         }
 

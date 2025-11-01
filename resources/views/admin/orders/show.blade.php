@@ -461,6 +461,37 @@
                     </table>
                 </div>
             @endif
+            @if ($order->logs->count())
+                <div class="border rounded p-3 mt-4">
+                    <div class="font-semibold mb-2">Historial de acciones</div>
+                    <table class="min-w-full bg-white border">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="p-2 border">Fecha</th>
+                                <th class="p-2 border">Usuario</th>
+                                <th class="p-2 border">Acción</th>
+                                <th class="p-2 border">Antes</th>
+                                <th class="p-2 border">Después</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($order->logs as $log)
+                                <tr>
+                                    <td class="p-2 border text-sm">{{ $log->created_at->format('d/m/Y H:i') }}</td>
+                                    <td class="p-2 border text-sm">{{ $log->user?->name ?? '—' }}</td>
+                                    <td class="p-2 border text-sm">{{ str_replace('_', ' ', $log->action) }}</td>
+                                    <td class="p-2 border text-xs text-gray-600">
+                                        {{ \Illuminate\Support\Str::limit((string) $log->old_value, 120) }}
+                                    </td>
+                                    <td class="p-2 border text-xs text-gray-900">
+                                        {{ \Illuminate\Support\Str::limit((string) $log->new_value, 120) }}
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
 
             {{-- Estado pedido --}}
             <div class="border rounded p-3">

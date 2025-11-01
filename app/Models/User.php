@@ -87,4 +87,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(\App\Models\PickBasket::class, 'warehouse_id');
     }
+    public function orderLogs()
+    {
+        return $this->hasMany(\App\Models\OrderLog::class);
+    }
+
 }
