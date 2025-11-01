@@ -6,11 +6,38 @@ use Illuminate\Database\Eloquent\Model;
 
 class Order extends Model
 {
-    protected $fillable = ['user_id', 'payment_method', 'payment_status', 'status', 'subtotal', 'tax', 'total', 'cod_details', 'voucher_url', 'paid_at'];
+    protected $fillable = [
+        'user_id',
+        'payment_method',
+        'payment_status',
+        'status',
+        'subtotal',
+        'tax',
+        'total',
+        'cod_details',
+        'voucher_url',
+        'paid_at',
+        'is_priority',
+        'priority_level',
+        'shipping_amount',
+        'shipping_estimated',
+        'shipping_actual',
+        'shipping_settlement_status',
+    ];
     protected $casts = [
         'is_priority' => 'boolean',
         'priority_level' => 'integer',
         'paid_at' => 'datetime',
+        'shipping_amount' => 'decimal:2',
+        'shipping_estimated' => 'decimal:2',
+        'shipping_actual' => 'decimal:2',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'confirmed_at' => 'datetime',
+        'preparing_at' => 'datetime',
+        'shipped_at' => 'datetime',
+        'delivered_at' => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
     public function items()
     {
@@ -51,5 +78,4 @@ class Order extends Model
     {
         return $this->hasMany(\App\Models\OrderLog::class)->latest();
     }
-
 }

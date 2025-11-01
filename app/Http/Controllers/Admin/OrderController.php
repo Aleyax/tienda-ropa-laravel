@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\PickBasket;
 use App\Support\OrderLogger;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -12,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use App\Models\OrderItem;
 use Illuminate\Support\Facades\Schema;
-
+use Illuminate\Support\Carbon;
 class OrderController extends Controller
 {
     // Lista con filtros simples (?method=&pstatus=&status=)
@@ -154,15 +155,17 @@ class OrderController extends Controller
     // Cambiar estado del pedido
     public function updateStatus(Request $request, Order $order)
     {
+        // 1) Validación básica: cualquier estado de la lista es válido
         $data = $request->validate([
             'status' => 'required|string|in:new,confirmed,preparing,shipped,delivered,cancelled',
             'note' => 'nullable|string|max:1000',
         ]);
 
-        // Permisos: responsable o admin
+        // 2) Permisos: admin o responsable mientras la canasta esté open/in_progress
         $basket = PickBasket::where('order_id', $order->id)->latest()->first();
         $isAdmin = Auth::user()?->hasAnyRole(['admin']) ?? false;
-        $isResponsible = $basket && in_array($basket->status, ['open', 'in_progress'], true)
+        $isResponsible = $basket
+            && in_array($basket->status, ['open', 'in_progress'], true)
             && (int) $basket->responsible_user_id === (int) Auth::id();
 
         abort_unless($isAdmin || $isResponsible, 403, 'No autorizado para cambiar el estado del pedido.');
@@ -170,17 +173,7 @@ class OrderController extends Controller
         $target = $data['status'];
         $current = $order->status;
 
-        // Reglas de transición (evita saltos arbitrarios)
-        $allowed = [
-            'new' => ['confirmed', 'cancelled'],
-            'confirmed' => ['preparing', 'cancelled'],
-            'preparing' => ['shipped', 'cancelled'],
-            'shipped' => ['delivered'],
-            'delivered' => [],                  // terminal
-            'cancelled' => [],                  // terminal
-        ];
-        abort_unless(in_array($target, $allowed[$current] ?? [], true), 422, "Transición inválida de {$current} a {$target}.");
-
+        // 3) Auditoría (antes)
         $old = [
             'status' => $current,
             'confirmed_at' => $order->confirmed_at?->toDateTimeString(),
@@ -191,27 +184,40 @@ class OrderController extends Controller
         ];
 
         DB::transaction(function () use ($order, $basket, $target) {
-            // Cambiar estado y setear timestamps por primer arribo
-            $order->status = $target;
-            match ($target) {
-                'confirmed' => $order->confirmed_at ??= now(),
-                'preparing' => $order->preparing_at ??= now(),
-                'shipped' => $order->shipped_at ??= now(),
-                'delivered' => $order->delivered_at ??= now(),
-                'cancelled' => $order->cancelled_at ??= now(),
-                default => null
-            };
 
+            // 4) Setear timestamp SOLO cuando entras por primera vez a ese estado
+            //    (nunca limpiar si retrocedes)
+            $now = now();
+            switch ($target) {
+                case 'confirmed':
+                    $order->confirmed_at ??= $now;
+                    break;
+                case 'preparing':
+                    $order->preparing_at ??= $now;
+                    break;
+                case 'shipped':
+                    $order->shipped_at ??= $now;
+                    break;
+                case 'delivered':
+                    $order->delivered_at ??= $now;
+                    break;
+                case 'cancelled':
+                    $order->cancelled_at ??= $now;
+                    break;
+            }
+
+            // 5) Actualizar estado
+            $order->status = $target;
             $order->save();
 
-            // Si se entregó, cerrar canasta si sigue abierta/en progreso
+            // 6) Si se entregó, cierra la canasta si seguía abierta/en progreso
             if ($basket && $target === 'delivered' && in_array($basket->status, ['open', 'in_progress'], true)) {
                 $basket->status = 'closed';
                 $basket->save();
             }
         });
 
-        // Auditoría
+        // 7) Auditoría (después)
         OrderLogger::log(
             $order,
             'update_order_status',
@@ -236,44 +242,45 @@ class OrderController extends Controller
     }
 
 
+
     // Cambiar estado del pago
     public function updatePaymentStatus(Request $request, Order $order)
     {
-        // Solo admin o vendedor pueden cambiar el estado global de pago
+        // Autorizar: admin o vendedor
         abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']), 403);
 
         $data = $request->validate([
             'payment_status' => 'required|in:unpaid,pending_confirmation,cod_promised,authorized,paid,failed,partially_paid',
         ]);
 
+        // Antes (old) para logging/auditoría
         $old = [
             'payment_status' => $order->payment_status,
-            'paid_at' => $order->paid_at?->toDateTimeString(),
+            'paid_at' => $order->paid_at?->toDateTimeString(), // ya es Carbon|null por el cast
         ];
 
+        // Actualizar
         $order->payment_status = $data['payment_status'];
         $order->paid_at = $data['payment_status'] === 'paid' ? now() : null;
         $order->save();
 
-        // Auditoría
-        OrderLogger::log(
-            $order,
-            'update_payment_status',
-            $old,
-            [
-                'payment_status' => $order->payment_status,
-                'paid_at' => $order->paid_at?->toDateTimeString(),
-            ],
-            [
+        // Después (new) para logging/auditoría
+        $new = [
+            'payment_status' => $order->payment_status,
+            'paid_at' => $order->paid_at?->toDateTimeString(),
+        ];
+
+        // (Opcional) tu logger si lo usas
+        if (class_exists(\App\Support\OrderLogger::class)) {
+            \App\Support\OrderLogger::log($order, 'update_payment_status', $old, $new, [
                 'route' => 'admin.orders.paystatus',
                 'ip' => $request->ip(),
-                'by' => Auth::id(),
-            ]
-        );
+                'user' => Auth::id(),
+            ]);
+        }
 
         return back()->with('success', "Estado de pago actualizado a {$data['payment_status']}.");
     }
-
     public function bulkStatus(Request $request)
     {
         $data = $request->validate([
@@ -428,7 +435,6 @@ class OrderController extends Controller
     }
     public function updatePriority(Request $request, Order $order)
     {
-        // Solo admin o vendedor pueden cambiar la prioridad
         abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']), 403);
 
         $data = $request->validate([
@@ -437,65 +443,29 @@ class OrderController extends Controller
             'action' => 'nullable|in:raise,lower,toggle',
         ]);
 
-        $old = [
-            'is_priority' => (bool) $order->is_priority,
-            'priority_level' => (int) $order->priority_level,
-        ];
-
         if (!empty($data['action'])) {
             switch ($data['action']) {
                 case 'raise':
                     $order->is_priority = true;
-                    // si era 0, arranca en 1 y luego suma
                     $order->priority_level = max((int) $order->priority_level, 1) + 1;
-                    $order->priority_level = min($order->priority_level, 99);
                     break;
-
                 case 'lower':
                     $order->priority_level = max((int) $order->priority_level - 1, 0);
                     if ($order->priority_level === 0) {
                         $order->is_priority = false;
                     }
                     break;
-
                 case 'toggle':
                     $order->is_priority = !$order->is_priority;
-                    if ($order->is_priority) {
-                        // si se enciende y está en 0 dale un valor por defecto
-                        if ((int) $order->priority_level === 0) {
-                            $order->priority_level = 10;
-                        }
-                    } else {
-                        $order->priority_level = 0;
-                    }
+                    $order->priority_level = $order->is_priority
+                        ? ((int) $order->priority_level === 0 ? 10 : (int) $order->priority_level)
+                        : 0;
                     break;
             }
-
             $order->save();
-
-            // Auditoría
-            OrderLogger::log(
-                $order,
-                'update_priority',
-                $old,
-                [
-                    'is_priority' => (bool) $order->is_priority,
-                    'priority_level' => (int) $order->priority_level,
-                ],
-                [
-                    'route' => 'admin.orders.priority',
-                    'action' => $data['action'],
-                    'ip' => $request->ip(),
-                    'by' => Auth::id(),
-                ]
-            );
-
-            return redirect()
-                ->route('admin.orders.show', $order)
-                ->with('success', 'Prioridad actualizada.');
+            return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad actualizada.');
         }
 
-        // Guardado por formulario normal
         if (array_key_exists('is_priority', $data)) {
             $order->is_priority = (bool) ((int) $data['is_priority']);
         }
@@ -505,28 +475,9 @@ class OrderController extends Controller
         }
 
         $order->save();
-
-        // Auditoría
-        OrderLogger::log(
-            $order,
-            'update_priority',
-            $old,
-            [
-                'is_priority' => (bool) $order->iupdateStatuss_priority,
-                'priority_level' => (int) $order->priority_level,
-            ],
-            [
-                'route' => 'admin.orders.priority',
-                'action' => 'form',
-                'ip' => $request->ip(),
-                'by' => Auth::id(),
-            ]
-        );
-
-        return redirect()
-            ->route('admin.orders.show', $order)
-            ->with('success', 'Prioridad guardada.');
+        return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad guardada.');
     }
+
 
     // app/Http/Controllers/Admin/OrderController.php
 
