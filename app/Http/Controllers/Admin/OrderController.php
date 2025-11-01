@@ -92,52 +92,50 @@ class OrderController extends Controller
     // Detalle
     public function show(Order $order)
     {
-        // Eager loading básico
+        // Eager loading
         $order->load([
             'user',
             'payments',
-            'items' => function ($q) {
-                // si tus OrderItem tienen relaciones, puedes agregarlas aquí
-                $q->with(['order']);
-            },
+            'items' => fn($q) => $q->with(['order']),
         ]);
 
-        // Canasta de picking asociada (la más reciente)
-        $basket = \App\Models\PickBasket::where('order_id', $order->id)
-            ->latest()
-            ->first();
+        // Canasta
+        $basket = \App\Models\PickBasket::where('order_id', $order->id)->latest()->first();
+
         // Usuario actual
         $me = Auth::user();
 
-
-        // Listado de usuarios activos (si existe is_active) y distintos a mí
+        // Users activos
         $activeUsers = \App\Models\User::query()
             ->when(Schema::hasColumn('users', 'is_active'), fn($q) => $q->where('is_active', 1))
-            ->where('id', '!=', $me?->id)   // por si $me es null
+            ->where('id', '!=', $me?->id)
             ->orderBy('name')
             ->get(['id', 'name', 'email']);
 
+        $hasPendingTransfer = $basket ? $basket->transfers()->where('status', 'pending')->exists() : false;
 
-        // ¿Hay transferencia pendiente sobre la canasta?
-        $hasPendingTransfer = $basket
-            ? $basket->transfers()->where('status', 'pending')->exists()
-            : false;
-
-        // ¿Puedo derivar? -> debo ser responsable, canasta abierta y sin transferencia pendiente
         $canTransfer = $basket
             && $basket->status === 'open'
             && (int) $basket->responsible_user_id === (int) ($me?->id ?? 0)
             && !$hasPendingTransfer;
 
-        // Solo lectura si no soy responsable (o no hay canasta)
         $readOnly = !$basket || (int) $basket->responsible_user_id !== (int) ($me?->id ?? 0);
         $meId = (int) ($me?->id ?? 0);
-        // Para el autocompletado en el Blade
+
         $jsUsers = $activeUsers->map(fn($u) => [
             'id' => $u->id,
             'name' => $u->name,
             'email' => $u->email,
         ]);
+
+        // === NUEVO: sincroniza estado global segun pagos y usa el resumen
+        $sync = $order->syncPaymentStatus(save: true);
+        $sumPaid = $sync['sum_paid'];
+        $sumPending = $sync['sum_pending'];
+        $sumFailed = $sync['sum_failed'];
+        $orderTotal = $sync['total'];
+        $remaining = $sync['remaining'];
+        $progressPct = $sync['progress_pct'];
 
         return view('admin.orders.show', compact(
             'order',
@@ -146,10 +144,17 @@ class OrderController extends Controller
             'canTransfer',
             'readOnly',
             'jsUsers',
-            'meId'
-
+            'meId',
+            'sumPaid',
+            'sumPending',
+            'sumFailed',
+            'orderTotal',
+            'remaining',
+            'progressPct'
         ));
     }
+
+
 
 
     // Cambiar estado del pedido

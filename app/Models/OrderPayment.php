@@ -9,11 +9,11 @@ class OrderPayment extends Model
 {
     // Opcional: constantes de estado
     public const STATUS_PENDING_CONFIRMATION = 'pending_confirmation';
-    public const STATUS_AUTHORIZED          = 'authorized';
-    public const STATUS_PAID                = 'paid';
-    public const STATUS_FAILED              = 'failed';
-    public const STATUS_REFUNDED            = 'refunded';
-    public const STATUS_PARTIALLY_PAID      = 'partially_paid';
+    public const STATUS_AUTHORIZED = 'authorized';
+    public const STATUS_PAID = 'paid';
+    public const STATUS_FAILED = 'failed';
+    public const STATUS_REFUNDED = 'refunded';
+    public const STATUS_PARTIALLY_PAID = 'partially_paid';
 
     protected $fillable = [
         'order_id',
@@ -27,7 +27,7 @@ class OrderPayment extends Model
     ];
 
     protected $casts = [
-        'amount'       => 'decimal:2',  // mejor que float
+        'amount' => 'decimal:2',  // mejor que float
         'collected_at' => 'datetime',
     ];
 
@@ -40,5 +40,9 @@ class OrderPayment extends Model
     public function collectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'collected_by');
+    }
+    public function scopeValidForBalance($q)
+    {
+        return $q->whereIn('status', \App\Support\Payments::VALID_STATUSES_FOR_BALANCE);
     }
 }

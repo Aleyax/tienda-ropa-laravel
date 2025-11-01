@@ -15,7 +15,7 @@ use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\ProductVariantController;
 use App\Http\Controllers\Admin\MediaController;
 use App\Http\Controllers\Admin\OrderController;
-
+use App\Http\Controllers\Admin\OrderPaymentController;
 Route::get('/', function () {
     return view('welcome');
 });
@@ -121,12 +121,29 @@ Route::middleware('auth')->group(function () {
 | Nota: usa el middleware de permisos que ya configuraste con Spatie.
 |       Todo va en UN solo grupo para evitar duplicados.
 */
+
+
+Route::prefix('admin')->middleware(['auth'])->group(function () {
+    // registrar pago para una orden
+    Route::post('/orders/{order}/payments', [OrderPaymentController::class, 'store'])
+        ->name('admin.orders.payments.store');
+
+    // actualizar estado de un pago (confirmar, fallar, etc.)
+    Route::post('/payments/{payment}/status', [OrderPaymentController::class, 'updateStatus'])
+        ->name('admin.orders.payments.status');
+
+    // (opcional) eliminar un comprobante
+    Route::delete('/payments/{payment}/evidence', [OrderPaymentController::class, 'deleteEvidence'])
+        ->name('admin.orders.payments.evidence.delete');
+    
+});
+
 Route::middleware(['auth'])
     ->prefix('admin')->name('admin.')
     ->group(function () {
 
         // routes/web.php (dentro del grupo admin)
-
+    
         Route::get('/baskets/transfers', [PickBasketController::class, 'transfersIndex'])
             ->name('baskets.transfers');
 

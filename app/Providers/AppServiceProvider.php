@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Models\OrderPayment;
+use App\Observers\OrderPaymentObserver;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\View;
 use App\Models\PickBasket;
@@ -28,7 +30,7 @@ class AppServiceProvider extends ServiceProvider
 
             $counts = [
                 'pendingTransfers' => 0,
-                'myOpenBaskets'    => 0,
+                'myOpenBaskets' => 0,
             ];
 
             if ($user) {
@@ -49,5 +51,6 @@ class AppServiceProvider extends ServiceProvider
 
             $view->with('basketMenuCounts', $counts);
         });
+        OrderPayment::observe(OrderPaymentObserver::class);
     }
 }

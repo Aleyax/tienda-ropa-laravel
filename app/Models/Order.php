@@ -78,4 +78,78 @@ class Order extends Model
     {
         return $this->hasMany(\App\Models\OrderLog::class)->latest();
     }
+    // app/Models/Order.php
+
+    public function recomputePaymentStatus(): array
+    {
+        // Sumas por estado
+        $sumPaid = (float) $this->payments()->whereIn('status', ['paid', 'authorized'])->sum('amount');
+        $sumPending = (float) $this->payments()->whereIn('status', ['pending_confirmation'])->sum('amount');
+        $sumFailed = (float) $this->payments()->whereIn('status', ['failed', 'refunded'])->sum('amount');
+
+        $total = (float) ($this->total ?? 0);
+        $remaining = max(0, round($total - $sumPaid, 2));
+        $progress = $total > 0 ? min(100, round(($sumPaid / $total) * 100)) : 0;
+
+        // Reglas de estado global
+        // Prioridad: pago completo > pago parcial > pendiente confirmación > unpaid
+        if ($total > 0 && $sumPaid >= $total) {
+            $computed = 'paid';
+        } elseif ($sumPaid > 0) {
+            $computed = 'partially_paid';
+        } elseif ($sumPending > 0) {
+            $computed = 'pending_confirmation';
+        } else {
+            $computed = 'unpaid';
+        }
+
+        return [
+            'computed_status' => $computed,
+            'sum_paid' => $sumPaid,
+            'sum_pending' => $sumPending,
+            'sum_failed' => $sumFailed,
+            'total' => $total,
+            'remaining' => $remaining,
+            'progress_pct' => $progress,
+        ];
+    }
+
+    /**
+     * Sincroniza payment_status y paid_at con los pagos registrados.
+     * Retorna el resumen para reusar en la vista.
+     */
+    public function syncPaymentStatus(bool $save = true): array
+    {
+        $res = $this->recomputePaymentStatus();
+
+        // Ajustar paid_at coherentemente
+        $newStatus = $res['computed_status'];
+        $dirty = false;
+
+        if ($this->payment_status !== $newStatus) {
+            $this->payment_status = $newStatus;
+            $dirty = true;
+        }
+
+        if ($newStatus === 'paid') {
+            // Si está completamente pagado, setear paid_at si no existe
+            if (is_null($this->paid_at)) {
+                $this->paid_at = now();
+                $dirty = true;
+            }
+        } else {
+            // Si deja de estar paid, paid_at debe limpiarse
+            if (!is_null($this->paid_at)) {
+                $this->paid_at = null;
+                $dirty = true;
+            }
+        }
+
+        if ($save && $dirty) {
+            $this->save();
+        }
+
+        return $res;
+    }
+
 }

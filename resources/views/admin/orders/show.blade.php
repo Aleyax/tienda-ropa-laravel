@@ -365,6 +365,10 @@
                 @endif
             </div>
 
+            {{-- === Resumen de pagos === --}}
+            @include('admin.orders.partials.payment-summary')
+
+
             <div class="border rounded p-3">
                 <div class="font-semibold mb-2">Registrar nuevo pago</div>
                 <form method="POST" action="{{ route('admin.orders.payments.store', $order) }}"
@@ -448,6 +452,36 @@
                                                         </option>
                                                     @endforeach
                                                 </select>
+                                                @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
+                                                    <form method="POST"
+                                                        action="{{ route('admin.orders.payments.status', $p) }}"
+                                                        class="mt-1">
+                                                        @csrf
+                                                        <input type="hidden" name="status" value="paid">
+                                                        <button
+                                                            class="bg-emerald-600 text-white px-2 py-1 rounded text-xs">Confirmar
+                                                            (paid)
+                                                        </button>
+                                                    </form>
+                                                @endif
+                                                @if ($p->evidence_url)
+                                                    <div class="flex items-center gap-2">
+                                                        <a href="{{ $p->evidence_url }}" target="_blank"
+                                                            class="text-blue-600 underline">Ver</a>
+                                                        @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
+                                                            <form method="POST"
+                                                                action="{{ route('admin.orders.payments.deleteEvidence', $p) }}">
+                                                                @csrf @method('DELETE')
+                                                                <button class="text-red-700 text-xs underline"
+                                                                    onclick="return confirm('¿Eliminar comprobante?')">
+                                                                    Quitar comprobante
+                                                                </button>
+                                                            </form>
+                                                        @endif
+                                                    </div>
+                                                @else
+                                                    —
+                                                @endif
                                                 <button
                                                     class="ml-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">Actualizar</button>
                                             </form>
