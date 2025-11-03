@@ -10,8 +10,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use App\Services\OrderPaymentRecalculator;
-use App\Support\Payments;
 
+use App\Support\Payments;
+use App\Services\PaymentLogger;
 class OrderPaymentController extends Controller
 {
     public function __construct(private OrderPaymentRecalculator $recalc)
@@ -53,9 +54,36 @@ class OrderPaymentController extends Controller
 
             // 3) Recalcular estado global de la orden
             $this->recalc->recalc($order);
+            PaymentLogger::log(
+                event: 'payment_created',
+                payload: [
+                    'new' => [
+                        'id' => $payment->id,
+                        'order_id' => $payment->order_id,
+                        'method' => $payment->method,
+                        'amount' => $payment->amount,
+                        'status' => $payment->status,
+                        'provider_ref' => $payment->provider_ref,
+                        'evidence_url' => $payment->evidence_url,
+                        'collected_by' => $payment->collected_by,
+                        'collected_at' => optional($payment->collected_at)?->toDateTimeString(),
+                    ],
+                ],
+                orderId: $order->id,
+                orderPaymentId: $payment->id,
+                meta: [
+                    'reason' => 'user_submit_payment',
+                    'uploaded' => (bool) $evidenceUrl,
+                    'evidence_name' => $request->file('evidence')?->getClientOriginalName(),
+                    'evidence_mime' => $request->file('evidence')?->getMimeType(),
+                    'evidence_size' => $request->file('evidence')?->getSize(),
+                ]
+            );
         });
 
-        return back()->with('success', 'Pago registrado correctamente.');
+        //return back()->with('success', 'Pago registrado correctamente.');
+        return redirect()->route('admin.orders.show', $order)->with('success', 'Pago registrado correctamente.');
+
     }
 
     /**
@@ -71,11 +99,25 @@ class OrderPaymentController extends Controller
         ]);
 
         DB::transaction(function () use ($payment, $data) {
+            $before = $payment->only(['status', 'amount', 'method', 'provider_ref', 'evidence_url']);
             $payment->status = $data['status'];
             $payment->save();
 
             // tras cambiar el estado del pago, recalcular la orden
             $this->recalc->recalcSafe($payment->order_id);
+
+            PaymentLogger::log(
+                event: 'payment_status_updated',
+                payload: [
+                    'old' => $before,
+                    'new' => $payment->only(['status', 'amount', 'method', 'provider_ref', 'evidence_url']),
+                ],
+                orderId: $payment->order_id,
+                orderPaymentId: $payment->id,
+                meta: [
+                    'reason' => 'admin_or_seller_update',
+                ]
+            );
         });
 
         return back()->with('success', "Estado del pago #{$payment->id} actualizado a {$data['status']}.");
@@ -83,7 +125,7 @@ class OrderPaymentController extends Controller
     public function deleteEvidence(Request $request, OrderPayment $payment)
     {
         abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']) ?? false, 403);
-
+        $before = $payment->only(['evidence_url']);
         if ($payment->evidence_url) {
             // evidence_url es la url pública; convertimos a path relativo si es de 'public'
             $publicPrefix = Storage::disk('public')->url('');
@@ -93,6 +135,18 @@ class OrderPaymentController extends Controller
             }
             $payment->evidence_url = null;
             $payment->save();
+            PaymentLogger::log(
+                event: 'payment_evidence_deleted',
+                payload: [
+                    'old' => $before,
+                    'new' => ['evidence_url' => null],
+                ],
+                orderId: $payment->order_id,
+                orderPaymentId: $payment->id,
+                meta: [
+                    'reason' => 'admin_or_seller_delete_evidence',
+                ]
+            );
         }
 
         return back()->with('success', 'Comprobante eliminado.');

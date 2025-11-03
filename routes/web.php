@@ -20,6 +20,8 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+
+
 Route::middleware(['auth', 'permission:settings.update'])
     ->prefix('admin')->name('admin.')
     ->group(function () {
@@ -135,7 +137,7 @@ Route::prefix('admin')->middleware(['auth'])->group(function () {
     // (opcional) eliminar un comprobante
     Route::delete('/payments/{payment}/evidence', [OrderPaymentController::class, 'deleteEvidence'])
         ->name('admin.orders.payments.evidence.delete');
-    
+
 });
 
 Route::middleware(['auth'])

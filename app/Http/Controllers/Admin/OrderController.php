@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\OrderPayment;
 use App\Models\PickBasket;
+use App\Services\OrderPaymentRecalculator;
+use App\Services\PaymentLogger;
 use App\Support\OrderLogger;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -13,9 +16,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use App\Models\OrderItem;
 use Illuminate\Support\Facades\Schema;
+use App\Models\PaymentLog;
 use Illuminate\Support\Carbon;
 class OrderController extends Controller
 {
+    public function __construct(private OrderPaymentRecalculator $recalc)
+    {
+    }
     // Lista con filtros simples (?method=&pstatus=&status=)
     public function index(Request $request)
     {
@@ -90,7 +97,7 @@ class OrderController extends Controller
 
 
     // Detalle
-    public function show(Order $order)
+    public function show(Request $request, Order $order)
     {
         // Eager loading
         $order->load([
@@ -136,6 +143,21 @@ class OrderController extends Controller
         $orderTotal = $sync['total'];
         $remaining = $sync['remaining'];
         $progressPct = $sync['progress_pct'];
+        // =============== LOGS DE PAGO (con filtros) ===============
+        $filterEvent = $request->query('log_event');       // ej: payment_created, payment_status_updated...
+        $filterActor = $request->query('log_actor');       // user_id (admin/vendedor)
+        $filterFrom = $request->query('log_from');        // YYYY-MM-DD
+        $filterTo = $request->query('log_to');          // YYYY-MM-DD
+
+        $logs = PaymentLog::query()
+            ->with('actor')
+            ->forOrder($order->id)
+            ->eventLike($filterEvent)
+            ->byActor($filterActor ? (int) $filterActor : null)
+            ->between($filterFrom, $filterTo)
+            ->latest('id')
+            ->paginate(10)
+            ->appends($request->only(['log_event', 'log_actor', 'log_from', 'log_to']));
 
         return view('admin.orders.show', compact(
             'order',
@@ -150,7 +172,12 @@ class OrderController extends Controller
             'sumFailed',
             'orderTotal',
             'remaining',
-            'progressPct'
+            'progressPct',
+            'logs',
+            'filterEvent',
+            'filterActor',
+            'filterFrom',
+            'filterTo'
         ));
     }
 
@@ -188,7 +215,7 @@ class OrderController extends Controller
             'cancelled_at' => $order->cancelled_at?->toDateTimeString(),
         ];
 
-        DB::transaction(function () use ($order, $basket, $target) {
+        DB::transaction(function () use ($order, $basket, $target, $old, $data) {
 
             // 4) Setear timestamp SOLO cuando entras por primera vez a ese estado
             //    (nunca limpiar si retrocedes)
@@ -214,6 +241,22 @@ class OrderController extends Controller
             // 5) Actualizar estado
             $order->status = $target;
             $order->save();
+            PaymentLogger::log(
+                event: 'order_status_updated',
+                payload: [
+                    'old' => $old, // tu array $old ya tiene status + timestamps
+                    'new' => [
+                        'status' => $order->status,
+                        'confirmed_at' => $order->confirmed_at?->toDateTimeString(),
+                        'preparing_at' => $order->preparing_at?->toDateTimeString(),
+                        'shipped_at' => $order->shipped_at?->toDateTimeString(),
+                        'delivered_at' => $order->delivered_at?->toDateTimeString(),
+                        'cancelled_at' => $order->cancelled_at?->toDateTimeString(),
+                    ],
+                ],
+                orderId: $order->id,
+                meta: ['note' => $data['note'] ?? null]
+            );
 
             // 6) Si se entregó, cierra la canasta si seguía abierta/en progreso
             if ($basket && $target === 'delivered' && in_array($basket->status, ['open', 'in_progress'], true)) {
@@ -268,6 +311,16 @@ class OrderController extends Controller
         $order->payment_status = $data['payment_status'];
         $order->paid_at = $data['payment_status'] === 'paid' ? now() : null;
         $order->save();
+        PaymentLogger::log(
+            event: 'order_payment_status_set',
+            payload: [
+                'old' => ['payment_status' => $order->getOriginal('payment_status'), 'paid_at' => $order->getOriginal('paid_at')],
+                'new' => ['payment_status' => $order->payment_status, 'paid_at' => optional($order->paid_at)?->toDateTimeString()],
+            ],
+            orderId: $order->id,
+            orderPaymentId: null,
+            meta: ['reason' => 'manual_override_by_admin_or_seller']
+        );
 
         // Después (new) para logging/auditoría
         $new = [
@@ -468,6 +521,21 @@ class OrderController extends Controller
                     break;
             }
             $order->save();
+            PaymentLogger::log(
+                event: 'order_priority_updated',
+                payload: [
+                    'old' => [
+                        'is_priority' => (bool) $order->getOriginal('is_priority'),
+                        'priority_level' => (int) $order->getOriginal('priority_level'),
+                    ],
+                    'new' => [
+                        'is_priority' => (bool) $order->is_priority,
+                        'priority_level' => (int) $order->priority_level,
+                    ],
+                ],
+                orderId: $order->id
+            );
+
             return redirect()->route('admin.orders.show', $order)->with('success', 'Prioridad actualizada.');
         }
 
@@ -540,4 +608,42 @@ class OrderController extends Controller
 
         return back()->with('success', 'Prioridad actualizada.');
     }
+    public function destroy(OrderPayment $payment)
+    {
+        abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']) ?? false, 403);
+
+        $before = $payment->only(['status', 'amount', 'method', 'evidence_url']);
+        $payment->delete();
+
+        PaymentLogger::log(
+            'payment_deleted',
+            ['old' => $before, 'new' => ['deleted_at' => now()->toDateTimeString()]],
+            $payment->order_id,
+            $payment->id
+        );
+
+        $this->recalc->recalcSafe($payment->order_id);
+
+        return back()->with('success', 'Pago eliminado.');
+    }
+
+    public function restore($id)
+    {
+        abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']) ?? false, 403);
+
+        $payment = OrderPayment::withTrashed()->findOrFail($id);
+        $payment->restore();
+
+        PaymentLogger::log(
+            'payment_restored',
+            ['old' => ['deleted_at' => now()->toDateTimeString()], 'new' => $payment->only(['status', 'amount', 'method', 'evidence_url'])],
+            $payment->order_id,
+            $payment->id
+        );
+
+        $this->recalc->recalcSafe($payment->order_id);
+
+        return back()->with('success', 'Pago restaurado.');
+    }
+
 }
