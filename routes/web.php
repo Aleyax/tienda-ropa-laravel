@@ -249,7 +249,7 @@ Route::middleware(['auth'])
 
 
         Route::post('/orders/{order}/recalc', [OrderController::class, 'recalc'])
-            ->name('admin.orders.recalc');
+            ->name('orders.recalc');
 
         /* ============================
         |  Productos (permisos propios)
