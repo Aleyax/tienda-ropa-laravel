@@ -3,61 +3,81 @@
 namespace App\Services;
 
 use App\Models\Order;
-use App\Support\Payments;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class OrderPaymentRecalculator
 {
     /**
-     * Recalcula amount_paid, payment_status y paid_at de la orden.
-     * Debe llamarse dentro de transacción cuando sea posible.
+     * Recalcula el estado de pago del pedido en base a sus pagos asociados.
      */
     public function recalc(Order $order): void
     {
-        // Bloqueo optimista: si llamas desde Observer ya vienes en transacción
-        $order->refresh();
+        DB::transaction(function () use ($order) {
 
-        // Sumar solo pagos válidos
-        $sum = (float) $order->payments()
-            ->whereIn('status', Payments::VALID_STATUSES_FOR_BALANCE)
-            ->sum('amount');
+            // Sumar pagos según su estado
+            $sumPaid = (float) $order->payments()
+                ->whereIn('status', ['paid', 'authorized'])
+                ->sum('amount');
 
-        $total = (float) $order->total;
+            $sumPending = (float) $order->payments()
+                ->where('status', 'pending_confirmation')
+                ->sum('amount');
 
-        $order->amount_paid = round($sum, 2);
+            $sumFailed = (float) $order->payments()
+                ->whereIn('status', ['failed', 'refunded'])
+                ->sum('amount');
 
-        // Determinar estado global del pago
-        if ($sum + Payments::EPSILON < 0.01) {
-            $order->payment_status = 'unpaid';
-            $order->paid_at = null;
-        } elseif ($sum + Payments::EPSILON < $total) {
-            // Hay algo pagado pero no completo
-            // Si quieres mantener "pending_confirmation" hasta validar comprobante, cámbialo aquí.
-            $order->payment_status = 'partially_paid';
-            $order->paid_at = null;
-        } else {
-            // Igual o mayor que el total (con tolerancia)
-            $order->payment_status = 'paid';
-            // mantén la primera fecha en que se completó el pago
-            if (empty($order->paid_at)) {
-                $order->paid_at = now();
+            $total = (float) $order->total;
+
+            // Determinar nuevo estado
+            $newStatus = match (true) {
+                $sumPaid >= $total && $total > 0 => 'paid',
+                $sumPaid > 0 && $sumPaid < $total => 'partially_paid',
+                $sumPending > 0 => 'pending_confirmation',
+                $sumFailed > 0 => 'failed',
+                default => 'unpaid',
+            };
+
+            $old = $order->payment_status;
+
+            // Solo actualizar si cambió
+            if ($newStatus !== $old) {
+                $order->payment_status = $newStatus;
+                $order->paid_at = $newStatus === 'paid' ? now() : null;
+                $order->save();
+
+                // Log opcional
+                Log::info("[OrderPaymentRecalc] Order #{$order->id}: {$old} → {$newStatus}");
             }
-        }
+            if ($newStatus !== $old) {
+                $order->payment_status = $newStatus;
+                $order->paid_at = $newStatus === 'paid' ? now() : null;
+                $order->save();
 
-        $order->save();
+                PaymentLogger::log(
+                    event: 'order_payment_status_recalc',
+                    payload: [
+                        'old' => ['payment_status' => $old],
+                        'new' => ['payment_status' => $newStatus],
+                    ],
+                    orderId: $order->id,
+                    meta: [
+                        'reason' => 'auto_recalc',
+                        'by' => 'system',
+                    ]
+                );
+            }
+        });
     }
 
     /**
-     * Versión segura con transacción + lock para llamadas externas.
+     * Recalcular de forma segura por ID (por si no tienes instancia cargada).
      */
     public function recalcSafe(int $orderId): void
     {
-        DB::transaction(function () use ($orderId) {
-            /** @var Order $order */
-            $order = Order::where('id', $orderId)->lockForUpdate()->first();
-            if (!$order) return;
-
-            $this->recalc($order); // ya hace refresh/round
-        });
+        if ($order = Order::find($orderId)) {
+            $this->recalc($order);
+        }
     }
 }

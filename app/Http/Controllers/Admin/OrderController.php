@@ -95,7 +95,11 @@ class OrderController extends Controller
         ));
     }
 
-
+    public function recalc(\App\Models\Order $order)
+    {
+        app(\App\Services\OrderPaymentRecalculator::class)->recalc($order);
+        return back()->with('success', 'Recalculado correctamente el estado de pago.');
+    }
     // Detalle
     public function show(Request $request, Order $order)
     {

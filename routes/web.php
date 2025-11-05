@@ -138,8 +138,17 @@ Route::prefix('admin')->middleware(['auth'])->group(function () {
     Route::delete('/payments/{payment}/evidence', [OrderPaymentController::class, 'deleteEvidence'])
         ->name('admin.orders.payments.evidence.delete');
 
-});
 
+
+});
+Route::middleware(['auth'])
+    ->prefix('admin')
+    ->as('admin.')
+    ->group(function () {
+        // ...tus otras rutas
+        Route::post('/orders/{order}/recalc', [OrderController::class, 'recalc'])
+            ->name('orders.recalc');
+    });
 Route::middleware(['auth'])
     ->prefix('admin')->name('admin.')
     ->group(function () {
@@ -237,6 +246,10 @@ Route::middleware(['auth'])
 
         Route::post('/orders/{order}/settlement/charge', [AdminOrderController::class, 'settlementCharge'])
             ->middleware('permission:payments.validate')->name('orders.settlement.charge');
+
+
+        Route::post('/orders/{order}/recalc', [OrderController::class, 'recalc'])
+            ->name('admin.orders.recalc');
 
         /* ============================
         |  Productos (permisos propios)

@@ -909,6 +909,17 @@
                         {{ $logs->links() }}
                     </div>
                 @endif
+
+                @if (auth()->user()
+                        ?->hasAnyRole(['admin', 'vendedor']))
+                    <form method="POST" action="{{ route('admin.orders.recalc', $order) }}" class="mt-2">
+                        @csrf
+                        <button class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
+                            🔄 Recalcular estado de pago
+                        </button>
+                    </form>
+                @endif
+
             </div>
 
 
