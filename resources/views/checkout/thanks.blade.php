@@ -38,4 +38,36 @@
         </div>
     @endif
 
+    {{-- En la página pública del pedido --}}
+    @if ($order->payment_status !== 'paid')
+        <div class="p-3 border rounded bg-yellow-50">
+            <p class="text-sm mb-2">Aún no registras un comprobante para este pedido.</p>
+            <a href="{{ route('orders.payments.create', $order) }}"
+                class="inline-block bg-blue-600 text-white px-3 py-1 rounded">
+                Subir comprobante
+            </a>
+        </div>
+    @endif
+
+    {{-- “Pagos registrados” para el cliente --}}
+    <div class="mt-4">
+        <h3 class="font-semibold">Pagos registrados</h3>
+        @if ($order->payments->isEmpty())
+            <p class="text-sm text-gray-600">Aún no se han registrado pagos en esta orden.</p>
+        @else
+            <ul class="text-sm list-disc pl-5">
+                @foreach ($order->payments as $p)
+                    <li>
+                        {{ $p->method }} — S/ {{ number_format($p->amount, 2) }} — {{ $p->status }}
+                        @if ($p->evidence_url)
+                            — <a class="text-blue-600 underline" href="{{ $p->evidence_url }}" target="_blank">Ver
+                                comprobante</a>
+                        @endif
+                    </li>
+                @endforeach
+            </ul>
+        @endif
+    </div>
+
+
 </x-app-layout>

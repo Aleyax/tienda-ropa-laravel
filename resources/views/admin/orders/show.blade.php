@@ -481,146 +481,7 @@
                     </table>
                 </div>
             @endif
-            @if ($order->logs->count())
-                <div class="border rounded p-3 mt-4">
-                    <div class="font-semibold mb-2">Historial de acciones</div>
-                    <table class="min-w-full bg-white border">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="p-2 border">Fecha</th>
-                                <th class="p-2 border">Usuario</th>
-                                <th class="p-2 border">Acción</th>
-                                <th class="p-2 border">Antes</th>
-                                <th class="p-2 border">Después</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach ($order->logs as $log)
-                                <tr>
-                                    <td class="p-2 border text-sm">{{ $log->created_at->format('d/m/Y H:i') }}</td>
-                                    <td class="p-2 border text-sm">{{ $log->user?->name ?? '—' }}</td>
-                                    <td class="p-2 border text-sm">{{ str_replace('_', ' ', $log->action) }}</td>
-                                    <td class="p-2 border text-xs text-gray-600">
-                                        {{ \Illuminate\Support\Str::limit((string) $log->old_value, 120) }}
-                                    </td>
-                                    <td class="p-2 border text-xs text-gray-900">
-                                        {{ \Illuminate\Support\Str::limit((string) $log->new_value, 120) }}
-                                    </td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
-            @endif
             {{-- === Historial de pagos (payment_logs) === --}}
-            <div class="border rounded p-3 mt-4">
-                <div class="flex items-center justify-between">
-                    <div class="font-semibold">Historial de pagos</div>
-                    <form method="GET" class="flex flex-wrap gap-2 items-end">
-                        <div>
-                            <label class="block text-xs text-gray-600">Evento</label>
-                            <input type="text" name="log_event" value="{{ $filterEvent }}"
-                                placeholder="payment_created / status_updated..." class="border p-1 w-48">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-gray-600">Actor (user_id)</label>
-                            <input type="number" name="log_actor" value="{{ $filterActor }}" class="border p-1 w-28">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-gray-600">Desde</label>
-                            <input type="date" name="log_from" value="{{ $filterFrom }}" class="border p-1">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-gray-600">Hasta</label>
-                            <input type="date" name="log_to" value="{{ $filterTo }}" class="border p-1">
-                        </div>
-                        <div>
-                            <button class="px-3 py-1 rounded bg-gray-800 text-white">Filtrar</button>
-                        </div>
-                    </form>
-                </div>
-
-                @if ($logs->count() === 0)
-                    <div class="text-sm text-gray-500 mt-3">Sin movimientos de pago para este pedido.</div>
-                @else
-                    <div class="overflow-x-auto mt-3">
-                        <table class="min-w-full bg-white border">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="p-2 border text-left">Fecha</th>
-                                    <th class="p-2 border text-left">Evento</th>
-                                    <th class="p-2 border text-left">Pago #</th>
-                                    <th class="p-2 border text-left">Actor</th>
-                                    <th class="p-2 border text-left">IP</th>
-                                    <th class="p-2 border text-left">Detalle</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($logs as $log)
-                                    <tr class="align-top">
-                                        <td class="p-2 border text-sm">{{ $log->created_at->format('d/m/Y H:i') }}</td>
-                                        <td class="p-2 border text-sm">
-                                            <span class="px-2 py-0.5 rounded bg-gray-100">{{ $log->event }}</span>
-                                        </td>
-                                        <td class="p-2 border text-sm">
-                                            @if ($log->order_payment_id)
-                                                <span class="text-xs">#{{ $log->order_payment_id }}</span>
-                                            @else
-                                                —
-                                            @endif
-                                        </td>
-                                        <td class="p-2 border text-sm">
-                                            @if ($log->actor)
-                                                {{ $log->actor->name }}
-                                                <span class="text-xs text-gray-500">({{ $log->actor_id }})</span>
-                                            @else
-                                                <span class="text-xs text-gray-500">—</span>
-                                            @endif
-                                        </td>
-
-                                        <td class="p-2 border text-xs text-gray-600">{{ $log->ip ?: '—' }}</td>
-                                        <td class="p-2 border text-xs">
-                                            {{-- Muestra un resumen seguro de payload/meta --}}
-                                            @php
-                                                $old = $log->payload['old'] ?? null;
-                                                $new = $log->payload['new'] ?? null;
-                                            @endphp
-
-                                            @if ($old || $new)
-                                                @if ($old)
-                                                    <div class="mb-1"><span class="font-semibold">Old:</span> <code
-                                                            class="bg-gray-50 p-1 rounded">{{ \Illuminate\Support\Str::limit(json_encode($old), 220) }}</code>
-                                                    </div>
-                                                @endif
-                                                @if ($new)
-                                                    <div><span class="font-semibold">New:</span> <code
-                                                            class="bg-gray-50 p-1 rounded">{{ \Illuminate\Support\Str::limit(json_encode($new), 220) }}</code>
-                                                    </div>
-                                                @endif
-                                            @else
-                                                <code
-                                                    class="bg-gray-50 p-1 rounded">{{ \Illuminate\Support\Str::limit(json_encode($log->payload), 220) }}</code>
-                                            @endif
-
-                                            @if (!empty($log->meta))
-                                                <div class="mt-1 text-gray-600">
-                                                    <span class="font-semibold">Meta:</span>
-                                                    <code
-                                                        class="bg-gray-50 p-1 rounded">{{ \Illuminate\Support\Str::limit(json_encode($log->meta), 220) }}</code>
-                                                </div>
-                                            @endif
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="mt-2">
-                        {{ $logs->links() }}
-                    </div>
-                @endif
-            </div>
 
             {{-- Estado pedido --}}
             <div class="border rounded p-3">
@@ -636,7 +497,118 @@
                     <button class="bg-gray-800 text-white px-3 rounded" @disabled($readOnly)>Guardar</button>
                 </form>
             </div>
+            <div class="border rounded p-3 mt-4">
+                <div class="font-semibold mb-2">Historial de pagos y cambios</div>
 
+                {{-- Filtros --}}
+                <form method="GET" class="grid md:grid-cols-5 gap-2 mb-3">
+                    <input type="hidden" name="tab" value="logs">
+                    <input name="log_event" value="{{ $filterEvent }}" class="border p-2"
+                        placeholder="Evento (texto)">
+                    <input name="log_actor" value="{{ $filterActor }}" class="border p-2"
+                        placeholder="Actor (user_id)">
+                    <input type="date" name="log_from" value="{{ $filterFrom }}" class="border p-2">
+                    <input type="date" name="log_to" value="{{ $filterTo }}" class="border p-2">
+                    <button class="bg-gray-800 text-white px-3 rounded">Filtrar</button>
+                </form>
+
+                @if ($logs->count() === 0)
+                    <div class="text-sm text-gray-600">Sin registros aún.</div>
+                @else
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full bg-white border">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="p-2 border">#</th>
+                                    <th class="p-2 border">Fecha</th>
+                                    <th class="p-2 border">Evento</th>
+                                    <th class="p-2 border">Actor</th>
+                                    <th class="p-2 border">Pago</th>
+                                    <th class="p-2 border">Detalle</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($logs as $log)
+                                    <tr class="align-top">
+                                        <td class="p-2 border text-xs text-gray-500">{{ $log->id }}</td>
+                                        <td class="p-2 border text-xs text-gray-600">
+                                            {{ $log->created_at?->format('d/m/Y H:i') }}
+                                        </td>
+                                        <td class="p-2 border text-sm">
+                                            <span class="px-2 py-0.5 rounded bg-gray-100">{{ $log->event }}</span>
+                                        </td>
+                                        <td class="p-2 border text-sm">
+                                            @if ($log->user)
+                                                {{ $log->user->name }}
+                                                <span class="text-xs text-gray-500">({{ $log->user_id }})</span>
+                                            @else
+                                                <span class="text-xs text-gray-500">—</span>
+                                            @endif
+                                        </td>
+                                        <td class="p-2 border text-xs">
+                                            @if ($log->order_payment_id)
+                                                #{{ $log->order_payment_id }}
+                                            @else
+                                                —
+                                            @endif
+                                        </td>
+                                        <td class="p-2 border text-xs">
+                                            {{-- meta resumida --}}
+                                            @php $meta = $log->meta ?? []; @endphp
+                                            @if (!empty($meta))
+                                                <div class="text-gray-700">
+                                                    @if (isset($meta['reason']))
+                                                        <div><strong>Razón:</strong> {{ $meta['reason'] }}</div>
+                                                    @endif
+                                                    @if (isset($meta['note']) && $meta['note'])
+                                                        <div><strong>Nota:</strong> {{ $meta['note'] }}</div>
+                                                    @endif
+                                                    @if (isset($meta['ip']))
+                                                        <div class="text-gray-500">IP: {{ $meta['ip'] }}</div>
+                                                    @endif
+                                                    @if (isset($meta['route']))
+                                                        <div class="text-gray-500">Route: {{ $meta['route'] }}</div>
+                                                    @endif
+                                                </div>
+                                            @endif
+
+                                            {{-- Old / New payload expandibles --}}
+                                            <details class="mt-1">
+                                                <summary class="cursor-pointer text-blue-700">Payload</summary>
+                                                <div class="grid md:grid-cols-2 gap-2 mt-1">
+                                                    <div>
+                                                        <div class="text-gray-500 mb-1">Old</div>
+                                                        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-x-auto">@json($log->old_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)</pre>
+                                                    </div>
+                                                    <div>
+                                                        <div class="text-gray-500 mb-1">New</div>
+                                                        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-x-auto">@json($log->new_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)</pre>
+                                                    </div>
+                                                </div>
+                                            </details>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="mt-2">
+                        {{ $logs->links() }}
+                    </div>
+                @endif
+
+                @if (auth()->user()
+                        ?->hasAnyRole(['admin', 'vendedor']))
+                    <form method="POST" action="{{ route('admin.orders.recalc', $order) }}" class="mt-2">
+                        @csrf
+                        <button class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
+                            🔄 Recalcular estado de pago
+                        </button>
+                    </form>
+                @endif
+
+            </div>
             {{-- Prioridad --}}
             @php
                 $canManagePriority = auth()
@@ -809,118 +781,7 @@
             </div>
 
             {{-- ====== Historial de pagos/estados ====== --}}
-            <div class="border rounded p-3 mt-4">
-                <div class="font-semibold mb-2">Historial de pagos y cambios</div>
 
-                {{-- Filtros --}}
-                <form method="GET" class="grid md:grid-cols-5 gap-2 mb-3">
-                    <input type="hidden" name="tab" value="logs">
-                    <input name="log_event" value="{{ $filterEvent }}" class="border p-2"
-                        placeholder="Evento (texto)">
-                    <input name="log_actor" value="{{ $filterActor }}" class="border p-2"
-                        placeholder="Actor (user_id)">
-                    <input type="date" name="log_from" value="{{ $filterFrom }}" class="border p-2">
-                    <input type="date" name="log_to" value="{{ $filterTo }}" class="border p-2">
-                    <button class="bg-gray-800 text-white px-3 rounded">Filtrar</button>
-                </form>
-
-                @if ($logs->count() === 0)
-                    <div class="text-sm text-gray-600">Sin registros aún.</div>
-                @else
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full bg-white border">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="p-2 border">#</th>
-                                    <th class="p-2 border">Fecha</th>
-                                    <th class="p-2 border">Evento</th>
-                                    <th class="p-2 border">Actor</th>
-                                    <th class="p-2 border">Pago</th>
-                                    <th class="p-2 border">Detalle</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($logs as $log)
-                                    <tr class="align-top">
-                                        <td class="p-2 border text-xs text-gray-500">{{ $log->id }}</td>
-                                        <td class="p-2 border text-xs text-gray-600">
-                                            {{ $log->created_at?->format('d/m/Y H:i') }}
-                                        </td>
-                                        <td class="p-2 border text-sm">
-                                            <span class="px-2 py-0.5 rounded bg-gray-100">{{ $log->event }}</span>
-                                        </td>
-                                        <td class="p-2 border text-sm">
-                                            @if ($log->user)
-                                                {{ $log->user->name }}
-                                                <span class="text-xs text-gray-500">({{ $log->user_id }})</span>
-                                            @else
-                                                <span class="text-xs text-gray-500">—</span>
-                                            @endif
-                                        </td>
-                                        <td class="p-2 border text-xs">
-                                            @if ($log->order_payment_id)
-                                                #{{ $log->order_payment_id }}
-                                            @else
-                                                —
-                                            @endif
-                                        </td>
-                                        <td class="p-2 border text-xs">
-                                            {{-- meta resumida --}}
-                                            @php $meta = $log->meta ?? []; @endphp
-                                            @if (!empty($meta))
-                                                <div class="text-gray-700">
-                                                    @if (isset($meta['reason']))
-                                                        <div><strong>Razón:</strong> {{ $meta['reason'] }}</div>
-                                                    @endif
-                                                    @if (isset($meta['note']) && $meta['note'])
-                                                        <div><strong>Nota:</strong> {{ $meta['note'] }}</div>
-                                                    @endif
-                                                    @if (isset($meta['ip']))
-                                                        <div class="text-gray-500">IP: {{ $meta['ip'] }}</div>
-                                                    @endif
-                                                    @if (isset($meta['route']))
-                                                        <div class="text-gray-500">Route: {{ $meta['route'] }}</div>
-                                                    @endif
-                                                </div>
-                                            @endif
-
-                                            {{-- Old / New payload expandibles --}}
-                                            <details class="mt-1">
-                                                <summary class="cursor-pointer text-blue-700">Payload</summary>
-                                                <div class="grid md:grid-cols-2 gap-2 mt-1">
-                                                    <div>
-                                                        <div class="text-gray-500 mb-1">Old</div>
-                                                        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-x-auto">@json($log->old_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)</pre>
-                                                    </div>
-                                                    <div>
-                                                        <div class="text-gray-500 mb-1">New</div>
-                                                        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-x-auto">@json($log->new_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)</pre>
-                                                    </div>
-                                                </div>
-                                            </details>
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="mt-2">
-                        {{ $logs->links() }}
-                    </div>
-                @endif
-
-                @if (auth()->user()
-                        ?->hasAnyRole(['admin', 'vendedor']))
-                    <form method="POST" action="{{ route('admin.orders.recalc', $order) }}" class="mt-2">
-                        @csrf
-                        <button class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
-                            🔄 Recalcular estado de pago
-                        </button>
-                    </form>
-                @endif
-
-            </div>
 
 
             {{-- Flash feedback --}}

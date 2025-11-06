@@ -13,6 +13,7 @@ use App\Services\OrderPaymentRecalculator;
 
 use App\Support\Payments;
 use App\Services\PaymentLogger;
+use Illuminate\Support\Str;
 class OrderPaymentController extends Controller
 {
     public function __construct(private OrderPaymentRecalculator $recalc)
@@ -34,12 +35,11 @@ class OrderPaymentController extends Controller
             // 1) Subir comprobante (si viene)
             $evidenceUrl = null;
             if ($request->hasFile('evidence')) {
-                // guarda en storage/app/public/order-payments/{order_id}/...
-                $path = $request->file('evidence')
-                    ->store("order-payments/{$order->id}", 'public');
-                $evidenceUrl = Storage::disk('public')->url($path);
-            }
+                $path = $request->file('evidence')->store("order-payments/{$order->id}", 'public');
 
+                // Evitamos url() del Filesystem y construimos la pública nosotros:
+                $evidenceUrl = asset('storage/' . $path);
+            }
             // 2) Crear pago
             /** @var OrderPayment $payment */
             $payment = $order->payments()->create([
@@ -125,16 +125,32 @@ class OrderPaymentController extends Controller
     public function deleteEvidence(Request $request, OrderPayment $payment)
     {
         abort_unless(Auth::user()?->hasAnyRole(['admin', 'vendedor']) ?? false, 403);
+
         $before = $payment->only(['evidence_url']);
+
         if ($payment->evidence_url) {
-            // evidence_url es la url pública; convertimos a path relativo si es de 'public'
-            $publicPrefix = Storage::disk('public')->url('');
-            if (str_starts_with($payment->evidence_url, $publicPrefix)) {
-                $relative = substr($payment->evidence_url, strlen($publicPrefix));
+            // 1) Extraer el path del URL (o dejar tal cual si ya es relativo)
+            $pathFromUrl = parse_url($payment->evidence_url, PHP_URL_PATH) ?: $payment->evidence_url;
+            // e.g. "/storage/order-payments/74/archivo.jpg"  ó  "order-payments/74/archivo.jpg"
+
+            // 2) Quitar el prefijo "/storage/" para obtener la ruta relativa dentro del disco 'public'
+            if (Str::startsWith($pathFromUrl, '/storage/')) {
+                $relative = ltrim(Str::after($pathFromUrl, '/storage/'), '/'); // "order-payments/74/archivo.jpg"
+            } else {
+                // Puede que ya venga "order-payments/74/archivo.jpg"
+                $relative = ltrim($pathFromUrl, '/');
+            }
+
+            // 3) Intentar borrar si existe
+            if ($relative && Storage::disk('public')->exists($relative)) {
                 Storage::disk('public')->delete($relative);
             }
+
+            // 4) Limpiar el campo y guardar
             $payment->evidence_url = null;
             $payment->save();
+
+            // 5) Log
             PaymentLogger::log(
                 event: 'payment_evidence_deleted',
                 payload: [
@@ -151,4 +167,5 @@ class OrderPaymentController extends Controller
 
         return back()->with('success', 'Comprobante eliminado.');
     }
+
 }
