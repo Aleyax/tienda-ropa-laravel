@@ -372,182 +372,56 @@
                 <div class="text-sm text-gray-600">Aún no se han registrado pagos en esta orden.</div>
             @endif
 
-            <div class="border rounded p-3">
-                <div class="font-semibold mb-2">Registrar nuevo pago</div>
-                <form method="POST" action="{{ route('admin.orders.payments.store', $order) }}"
-                    enctype="multipart/form-data" class="space-y-2">
-                    @csrf
-                    <div>
-                        <label class="block text-sm">Método</label>
-                        <input type="text" name="method" class="border p-2 w-full"
-                            placeholder="Transferencia / Yape / Plin" required>
+            {{-- Tabs pagos --}}
+            <div x-data="{ tab: '{{ request('tab', 'pagos') }}' }" class="border rounded">
+                <div class="flex gap-2 border-b p-2">
+                    <button class="px-3 py-1 rounded"
+                        :class="tab === 'pagos' ? 'bg-gray-800 text-white' : 'bg-gray-100'" @click="tab='pagos'">Pagos
+                        registrados</button>
+                    <button class="px-3 py-1 rounded"
+                        :class="tab === 'eliminados' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                        @click="tab='eliminados'">Eliminados</button>
+                    <button class="px-3 py-1 rounded"
+                        :class="tab === 'historial' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                        @click="tab='historial'">Historial de pagos y cambios</button>
+                    <div class="ml-auto">
+                        @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
+                            <button @click="$dispatch('open-register-payment')"
+                                class="bg-blue-600 text-white px-3 py-1 rounded">+ Registrar pago</button>
+                        @endif
                     </div>
-                    <div>
-                        <label class="block text-sm">Monto (S/)</label>
-                        <input type="number" step="0.01" name="amount" class="border p-2 w-full" required>
-                    </div>
-                    <div>
-                        <label class="block text-sm">Referencia bancaria</label>
-                        <input type="text" name="provider_ref" class="border p-2 w-full">
-                    </div>
-                    <div>
-                        <label class="block text-sm">Comprobante (imagen o PDF)</label>
-                        <input type="file" name="evidence" class="border p-2 w-full" accept=".jpg,.jpeg,.png,.pdf">
-                    </div>
-                    <button class="bg-blue-600 text-white px-3 py-1 rounded">Registrar Pago</button>
-                </form>
-            </div>
-            <div class="border rounded p-3 mt-4">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="font-semibold">Pagos registrados</div>
-
-                    {{-- Toggle: Ver/Ocultar eliminados (solo funciona si luego activas SoftDeletes en OrderPayment) --}}
-                    <form method="GET" action="{{ route('admin.orders.show', $order) }}">
-                        <input type="hidden" name="include_deleted" value="{{ $includeDeleted ? '0' : '1' }}">
-                        <button class="text-xs underline">
-                            {{ $includeDeleted ? 'Ocultar eliminados' : 'Ver eliminados' }}
-                        </button>
-                    </form>
                 </div>
 
-                @if ($order->payments->count() === 0)
-                    <div class="text-sm text-gray-600">Aún no se han registrado pagos en esta orden.</div>
-                @else
-                    <table class="min-w-full bg-white border">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="p-2 border">#</th>
-                                <th class="p-2 border">Método</th>
-                                <th class="p-2 border">Monto</th>
-                                <th class="p-2 border">Referencia</th>
-                                <th class="p-2 border">Comprobante</th>
-                                <th class="p-2 border">Estado</th>
-                                <th class="p-2 border">Registrado por</th>
-                                <th class="p-2 border">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach ($order->payments as $p)
-                                <tr
-                                    class="{{ method_exists($p, 'trashed') && $p->trashed() ? 'opacity-60 bg-gray-50' : '' }}">
-                                    <td class="p-2 border text-center">{{ $p->id }}</td>
-                                    <td class="p-2 border">{{ $p->method }}</td>
-                                    <td class="p-2 border text-right">S/ {{ number_format($p->amount, 2) }}</td>
-                                    <td class="p-2 border text-xs text-gray-600">{{ $p->provider_ref ?? '—' }}</td>
-                                    <td class="p-2 border text-center">
-                                        @if ($p->evidence_url)
-                                            <a href="{{ $p->evidence_url }}" target="_blank"
-                                                class="text-blue-600 underline">Ver</a>
-                                            {{-- borrar comprobante (si quieres) --}}
-                                            @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
-                                                <form method="POST"
-                                                    action="{{ route('admin.orders.payments.evidence.delete', $p) }}"
-                                                    class="inline">
-                                                    @csrf
-                                                    @method('DELETE')
-                                                    <button class="ml-2 text-xs underline text-red-700"
-                                                        onclick="return confirm('¿Eliminar comprobante?')">
-                                                        Eliminar comprobante
-                                                    </button>
-                                                </form>
-                                            @endif
-                                        @else
-                                            —
-                                        @endif
-                                    </td>
-                                    <td class="p-2 border">
-                                        <span class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">
-                                            {{ str_replace('_', ' ', $p->status) }}
-                                        </span>
-                                        @if (method_exists($p, 'trashed') && $p->trashed())
-                                            <span class="ml-1 text-xs px-2 py-0.5 rounded bg-red-100 text-red-800">
-                                                Eliminado
-                                            </span>
-                                        @endif
-                                    </td>
-                                    <td class="p-2 border text-sm text-gray-600">
-                                        {{ $p->collectedBy?->name ?? '—' }}<br>
-                                        <span class="text-xs">{{ $p->collected_at?->format('d/m/Y H:i') ?? '' }}</span>
-                                    </td>
-                                    <td class="p-2 border text-center space-y-1">
-                                        @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
-                                            {{-- Cambiar estado (usa tu ruta existente) --}}
-                                            <form method="POST"
-                                                action="{{ route('admin.orders.payments.status', $p) }}">
-                                                @csrf
-                                                <select name="status" class="border p-1 text-sm">
-                                                    @foreach (['pending_confirmation', 'authorized', 'paid', 'failed', 'partially_paid', 'refunded'] as $status)
-                                                        <option value="{{ $status }}" @selected($p->status === $status)>
-                                                            {{ ucfirst(str_replace('_', ' ', $status)) }}
-                                                        </option>
-                                                    @endforeach
-                                                </select>
-                                                <button class="ml-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">
-                                                    Actualizar
-                                                </button>
-                                            </form>
+                {{-- TAB: PAGOS --}}
+                <div x-show="tab==='pagos'" x-cloak class="p-3">
+                    @include('admin.orders.partials.payments-table', [
+                        'rows' => $order->payments,
+                        'showActions' => true,
+                        'mode' => 'active',
+                    ])
+                </div>
 
-                                            {{-- Botón directo a "paid" (opcional) --}}
-                                            <form method="POST"
-                                                action="{{ route('admin.orders.payments.status', $p) }}">
-                                                @csrf
-                                                <input type="hidden" name="status" value="paid">
-                                                <button class="bg-emerald-600 text-white px-2 py-1 rounded text-xs">
-                                                    Confirmar (paid)
-                                                </button>
-                                            </form>
+                {{-- TAB: ELIMINADOS (si usas SoftDeletes en OrderPayment) --}}
+                <div x-show="tab==='eliminados'" x-cloak class="p-3">
+                    @include('admin.orders.partials.payments-table', [
+                        'rows' => $deletedPayments ?? collect(),
+                        'showActions' => true,
+                        'mode' => 'deleted',
+                    ])
+                </div>
 
-                                            {{-- Si luego agregas SoftDeletes en OrderPayment, activa estos: --}}
-                                            @if (method_exists($p, 'trashed') && $p->trashed())
-                                                {{-- Restaurar --}}
-                                                @if (Route::has('admin.payments.restore'))
-                                                    <form method="POST"
-                                                        action="{{ route('admin.payments.restore', $p->id) }}">
-                                                        @csrf
-                                                        <button
-                                                            class="bg-emerald-600 text-white px-2 py-1 rounded text-xs">
-                                                            Restaurar
-                                                        </button>
-                                                    </form>
-                                                @endif
-
-                                                {{-- Eliminar definitivo (solo admin) --}}
-                                                @if (auth()->user()->hasRole('admin') && Route::has('admin.payments.forceDelete'))
-                                                    <form method="POST"
-                                                        action="{{ route('admin.payments.forceDelete', $p->id) }}"
-                                                        onsubmit="return confirm('¿Eliminar DEFINITIVAMENTE?')">
-                                                        @csrf
-                                                        @method('DELETE')
-                                                        <button class="bg-red-600 text-white px-2 py-1 rounded text-xs">
-                                                            Eliminar definitivo
-                                                        </button>
-                                                    </form>
-                                                @endif
-                                            @else
-                                                {{-- Eliminar (soft) si creas esa ruta luego --}}
-                                                @if (Route::has('admin.payments.destroy'))
-                                                    <form method="POST"
-                                                        action="{{ route('admin.payments.destroy', $p) }}"
-                                                        onsubmit="return confirm('¿Eliminar este pago? (Se puede restaurar)')">
-                                                        @csrf
-                                                        @method('DELETE')
-                                                        <button
-                                                            class="bg-gray-200 text-gray-800 px-2 py-1 rounded text-xs">
-                                                            Eliminar
-                                                        </button>
-                                                    </form>
-                                                @endif
-                                            @endif
-                                        @else
-                                            <span class="text-xs text-gray-400">Sin permiso</span>
-                                        @endif
-                                    </td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                @endif
+                {{-- TAB: HISTORIAL --}}
+                <div x-show="tab==='historial'" x-cloak class="p-3">
+                    @include('admin.orders.partials.payment-logs', [
+                        'logs' => $logs,
+                        'filterEvent' => $filterEvent,
+                        'filterActor' => $filterActor,
+                        'filterFrom' => $filterFrom,
+                        'filterTo' => $filterTo,
+                    ])
+                </div>
             </div>
+
 
 
 
@@ -742,7 +616,8 @@
                         </form>
                     </div>
                 @else
-                    <div class="text-sm text-gray-600">Prioridad: <strong>{{ $order->is_priority ? 'Sí' : 'No' }}</strong>
+                    <div class="text-sm text-gray-600">Prioridad:
+                        <strong>{{ $order->is_priority ? 'Sí' : 'No' }}</strong>
                         (nivel {{ (int) $order->priority_level }})
                     </div>
                 @endif
@@ -860,6 +735,23 @@
                 <div class="bg-red-100 text-red-800 p-2 rounded">{{ session('error') }}</div>
             @endif
         </div>
+    </div>
+    {{-- Modal: Ver comprobante --}}
+    <div x-data="{ url: null }" @open-view-evidence.window="url=$event.detail.url; $refs.modalView.showModal()" x-cloak>
+        <dialog x-ref="modalView" class="rounded-lg p-0 max-w-3xl w-[90vw]">
+            <div class="flex justify-between items-center px-4 py-2 border-b">
+                <h3 class="font-semibold">Comprobante</h3>
+                <button class="text-sm" @click="$refs.modalView.close()">✕</button>
+            </div>
+            <div class="p-4">
+                <template x-if="url && (url.endsWith('.pdf') || url.includes('.pdf'))">
+                    <iframe :src="url" class="w-full h-[70vh] border rounded"></iframe>
+                </template>
+                <template x-if="url && !(url.endsWith('.pdf') || url.includes('.pdf'))">
+                    <img :src="url" class="max-h-[70vh] mx-auto">
+                </template>
+            </div>
+        </dialog>
     </div>
 
     {{-- ===== JS: cálculo diff + transferencia con input predictivo ===== --}}
