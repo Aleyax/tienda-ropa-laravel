@@ -397,10 +397,22 @@
                     <button class="bg-blue-600 text-white px-3 py-1 rounded">Registrar Pago</button>
                 </form>
             </div>
-            {{-- === Pagos registrados === --}}
-            @if ($order->payments->count())
-                <div class="border rounded p-3 mt-4">
-                    <div class="font-semibold mb-2">Pagos registrados</div>
+            <div class="border rounded p-3 mt-4">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="font-semibold">Pagos registrados</div>
+
+                    {{-- Toggle: Ver/Ocultar eliminados (solo funciona si luego activas SoftDeletes en OrderPayment) --}}
+                    <form method="GET" action="{{ route('admin.orders.show', $order) }}">
+                        <input type="hidden" name="include_deleted" value="{{ $includeDeleted ? '0' : '1' }}">
+                        <button class="text-xs underline">
+                            {{ $includeDeleted ? 'Ocultar eliminados' : 'Ver eliminados' }}
+                        </button>
+                    </form>
+                </div>
+
+                @if ($order->payments->count() === 0)
+                    <div class="text-sm text-gray-600">Aún no se han registrado pagos en esta orden.</div>
+                @else
                     <table class="min-w-full bg-white border">
                         <thead class="bg-gray-50">
                             <tr>
@@ -411,12 +423,13 @@
                                 <th class="p-2 border">Comprobante</th>
                                 <th class="p-2 border">Estado</th>
                                 <th class="p-2 border">Registrado por</th>
-                                <th class="p-2 border">Acción</th>
+                                <th class="p-2 border">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             @foreach ($order->payments as $p)
-                                <tr>
+                                <tr
+                                    class="{{ method_exists($p, 'trashed') && $p->trashed() ? 'opacity-60 bg-gray-50' : '' }}">
                                     <td class="p-2 border text-center">{{ $p->id }}</td>
                                     <td class="p-2 border">{{ $p->method }}</td>
                                     <td class="p-2 border text-right">S/ {{ number_format($p->amount, 2) }}</td>
@@ -425,26 +438,40 @@
                                         @if ($p->evidence_url)
                                             <a href="{{ $p->evidence_url }}" target="_blank"
                                                 class="text-blue-600 underline">Ver</a>
+                                            {{-- borrar comprobante (si quieres) --}}
+                                            @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
+                                                <form method="POST"
+                                                    action="{{ route('admin.orders.payments.evidence.delete', $p) }}"
+                                                    class="inline">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button class="ml-2 text-xs underline text-red-700"
+                                                        onclick="return confirm('¿Eliminar comprobante?')">
+                                                        Eliminar comprobante
+                                                    </button>
+                                                </form>
+                                            @endif
                                         @else
                                             —
                                         @endif
                                     </td>
                                     <td class="p-2 border">
-                                        <span
-                                            class="px-2 py-1 text-xs rounded 
-                @if ($p->status === 'paid') bg-green-100 text-green-800
-                @elseif($p->status === 'pending_confirmation') bg-yellow-100 text-yellow-800
-                @elseif($p->status === 'failed') bg-red-100 text-red-800
-                @else bg-gray-100 text-gray-800 @endif">
-                                            {{ $p->status }}
+                                        <span class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">
+                                            {{ str_replace('_', ' ', $p->status) }}
                                         </span>
+                                        @if (method_exists($p, 'trashed') && $p->trashed())
+                                            <span class="ml-1 text-xs px-2 py-0.5 rounded bg-red-100 text-red-800">
+                                                Eliminado
+                                            </span>
+                                        @endif
                                     </td>
                                     <td class="p-2 border text-sm text-gray-600">
                                         {{ $p->collectedBy?->name ?? '—' }}<br>
                                         <span class="text-xs">{{ $p->collected_at?->format('d/m/Y H:i') ?? '' }}</span>
                                     </td>
-                                    <td class="p-2 border text-center">
+                                    <td class="p-2 border text-center space-y-1">
                                         @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
+                                            {{-- Cambiar estado (usa tu ruta existente) --}}
                                             <form method="POST"
                                                 action="{{ route('admin.orders.payments.status', $p) }}">
                                                 @csrf
@@ -455,22 +482,62 @@
                                                         </option>
                                                     @endforeach
                                                 </select>
-                                                @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
+                                                <button class="ml-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">
+                                                    Actualizar
+                                                </button>
+                                            </form>
+
+                                            {{-- Botón directo a "paid" (opcional) --}}
+                                            <form method="POST"
+                                                action="{{ route('admin.orders.payments.status', $p) }}">
+                                                @csrf
+                                                <input type="hidden" name="status" value="paid">
+                                                <button class="bg-emerald-600 text-white px-2 py-1 rounded text-xs">
+                                                    Confirmar (paid)
+                                                </button>
+                                            </form>
+
+                                            {{-- Si luego agregas SoftDeletes en OrderPayment, activa estos: --}}
+                                            @if (method_exists($p, 'trashed') && $p->trashed())
+                                                {{-- Restaurar --}}
+                                                @if (Route::has('admin.payments.restore'))
                                                     <form method="POST"
-                                                        action="{{ route('admin.orders.payments.status', $p) }}"
-                                                        class="mt-1">
+                                                        action="{{ route('admin.payments.restore', $p->id) }}">
                                                         @csrf
-                                                        <input type="hidden" name="status" value="paid">
                                                         <button
-                                                            class="bg-emerald-600 text-white px-2 py-1 rounded text-xs">Confirmar
-                                                            (paid)
+                                                            class="bg-emerald-600 text-white px-2 py-1 rounded text-xs">
+                                                            Restaurar
                                                         </button>
                                                     </form>
                                                 @endif
 
-                                                <button
-                                                    class="ml-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">Actualizar</button>
-                                            </form>
+                                                {{-- Eliminar definitivo (solo admin) --}}
+                                                @if (auth()->user()->hasRole('admin') && Route::has('admin.payments.forceDelete'))
+                                                    <form method="POST"
+                                                        action="{{ route('admin.payments.forceDelete', $p->id) }}"
+                                                        onsubmit="return confirm('¿Eliminar DEFINITIVAMENTE?')">
+                                                        @csrf
+                                                        @method('DELETE')
+                                                        <button class="bg-red-600 text-white px-2 py-1 rounded text-xs">
+                                                            Eliminar definitivo
+                                                        </button>
+                                                    </form>
+                                                @endif
+                                            @else
+                                                {{-- Eliminar (soft) si creas esa ruta luego --}}
+                                                @if (Route::has('admin.payments.destroy'))
+                                                    <form method="POST"
+                                                        action="{{ route('admin.payments.destroy', $p) }}"
+                                                        onsubmit="return confirm('¿Eliminar este pago? (Se puede restaurar)')">
+                                                        @csrf
+                                                        @method('DELETE')
+                                                        <button
+                                                            class="bg-gray-200 text-gray-800 px-2 py-1 rounded text-xs">
+                                                            Eliminar
+                                                        </button>
+                                                    </form>
+                                                @endif
+                                            @endif
                                         @else
                                             <span class="text-xs text-gray-400">Sin permiso</span>
                                         @endif
@@ -479,9 +546,10 @@
                             @endforeach
                         </tbody>
                     </table>
-                </div>
-            @endif
-            {{-- === Historial de pagos (payment_logs) === --}}
+                @endif
+            </div>
+
+
 
             {{-- Estado pedido --}}
             <div class="border rounded p-3">

@@ -103,10 +103,16 @@ class OrderController extends Controller
     // Detalle
     public function show(Request $request, Order $order)
     {
+        $includeDeleted = (bool) request('include_deleted');
         // Eager loading
         $order->load([
             'user',
-            'payments',
+            'payments' => function ($q) use ($includeDeleted) {
+                if ($includeDeleted) {
+                    $q->withTrashed();
+                }
+                $q->orderByDesc('id');
+            },
             'items' => fn($q) => $q->with(['order']),
         ]);
 
@@ -181,7 +187,8 @@ class OrderController extends Controller
             'filterEvent',
             'filterActor',
             'filterFrom',
-            'filterTo'
+            'filterTo',
+            'includeDeleted'
         ));
     }
 

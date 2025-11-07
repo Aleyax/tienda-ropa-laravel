@@ -8,50 +8,48 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use App\Services\OrderPaymentRecalculator;
 
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 class OrderPaymentPublicController extends Controller
 {
+    use AuthorizesRequests; // Add this line to include the trait
     public function create(Order $order)
     {
-        // Solo el dueño del pedido puede ver el form
-        abort_unless((int) $order->user_id === (int) Auth::id(), 403);
-        // Si ya está paid, opcional: bloquear re-subidas
-        // abort_if($order->payment_status === 'paid', 403);
+        $this->authorize('uploadPayment', $order);
+
+        $order->load('payments');
 
         return view('shop.orders.payment-upload', compact('order'));
     }
 
-    public function store(Request $request, Order $order, OrderPaymentRecalculator $recalc)
+    public function store(Request $request, Order $order, \App\Services\OrderPaymentRecalculator $recalc)
     {
-        abort_unless((int) $order->user_id === (int) Auth::id(), 403);
+        $this->authorize('uploadPayment', $order);
 
         $data = $request->validate([
-            'method' => 'required|string|max:50',      // Transferencia / Yape / Plin
             'amount' => 'required|numeric|min:0.01',
+            'method' => 'required|string|max:50',
             'provider_ref' => 'nullable|string|max:100',
             'evidence' => 'required|file|mimes:jpg,jpeg,png,pdf|max:4096',
         ]);
 
-        // Subir evidencia
         $path = $request->file('evidence')->store("order-payments/{$order->id}", 'public');
-        $url = asset('storage/' . $path);
+        $url = asset("storage/{$path}");
 
-        // Crear pago en pending_confirmation
         $order->payments()->create([
-            'method' => $data['method'],
             'amount' => $data['amount'],
-            'status' => 'pending_confirmation',
+            'method' => $data['method'],
             'provider_ref' => $data['provider_ref'] ?? null,
             'evidence_url' => $url,
-            'collected_by' => Auth::id(),
+            'status' => 'pending_confirmation',
+            'collected_by' => $order->user_id,
             'collected_at' => now(),
         ]);
 
-        // Recalcular estado global del pedido
         $recalc->recalc($order);
 
-        // Redirige al detalle del pedido del cliente (ajusta a tu ruta real)
         return redirect()
-            ->route('admin.orders.show', $order)  // o tu “thanks”
-            ->with('success', 'Comprobante enviado. Revisaremos tu pago pronto.');
+            ->route('checkout.thanks', $order)
+            ->with('success', 'Tu comprobante fue enviado. Estamos verificando tu pago.');
     }
+
 }

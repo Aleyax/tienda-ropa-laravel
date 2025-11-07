@@ -31,7 +31,7 @@ class OrderPayment extends Model
         'amount' => 'decimal:2',  // mejor que float
         'collected_at' => 'datetime',
     ];
-
+    protected $dates = ['deleted_at', 'collected_at'];
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);

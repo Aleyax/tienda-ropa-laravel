@@ -39,15 +39,19 @@
     @endif
 
     {{-- En la página pública del pedido --}}
-    @if ($order->payment_status !== 'paid')
-        <div class="p-3 border rounded bg-yellow-50">
-            <p class="text-sm mb-2">Aún no registras un comprobante para este pedido.</p>
-            <a href="{{ route('orders.payments.create', $order) }}"
-                class="inline-block bg-blue-600 text-white px-3 py-1 rounded">
+    @if ($order->payment_method === 'transfer' && $order->payments()->count() === 0)
+        <div class="mt-4 p-3 bg-yellow-50 border rounded">
+            <div class="font-semibold">Sube tu comprobante</div>
+            <p class="text-sm">Aún no registras pagos para esta orden. Por favor, sube tu comprobante para agilizar la
+                validación.</p>
+            <a href="{{ route('shop.orders.payments.create', $order) }}"
+                class="inline-block mt-2 px-3 py-1 rounded bg-blue-600 text-white">
                 Subir comprobante
             </a>
         </div>
     @endif
+
+
 
     {{-- “Pagos registrados” para el cliente --}}
     <div class="mt-4">

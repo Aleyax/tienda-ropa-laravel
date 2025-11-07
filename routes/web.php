@@ -14,7 +14,7 @@ use App\Http\Controllers\OrderPaymentPublicController;
 // Admin
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\OrderController;
-use App\Http\Controllers\Admin\AdminOrderController; // para liquidación envío
+use App\Http\Controllers\Admin\AdminOrderController; // liquidación envío
 use App\Http\Controllers\Admin\OrderPaymentController;
 use App\Http\Controllers\Admin\PickBasketController;
 use App\Http\Controllers\Admin\ProductController;
@@ -24,7 +24,7 @@ use App\Http\Controllers\Admin\MediaController;
 Route::get('/', fn() => view('welcome'));
 
 /* =========================================================================
-| Admin: Settings (permiso específico)
+| Admin: Settings (solo settings)
 * =========================================================================*/
 Route::middleware(['auth', 'permission:settings.update'])
     ->prefix('admin')->as('admin.')
@@ -79,27 +79,20 @@ Route::middleware('auth')->group(function () {
 });
 
 /* =========================================================================
-| *** Público autenticado: Comprobantes de pago del pedido ***
-|   Prefijo: /orders
-|   Namespace (names): orders.*
+| Público autenticado: Comprobantes de pago del pedido
+| Prefix: /orders   Names: orders.*
 * =========================================================================*/
 Route::middleware(['auth'])
     ->prefix('orders')->as('orders.')
     ->group(function () {
-        // Form para subir comprobante
         Route::get('{order}/payments/new', [OrderPaymentPublicController::class, 'create'])
             ->name('payments.create');
-
-        // Guarda el comprobante
         Route::post('{order}/payments', [OrderPaymentPublicController::class, 'store'])
             ->name('payments.store');
     });
 
 /* =========================================================================
-| *** ADMIN ***
-|   Prefijo: /admin
-|   Namespace (names): admin.*
-|   Middleware: auth + (roles/permissions dentro de cada ruta)
+| ADMIN (Prefix: /admin  Names: admin.*)
 * =========================================================================*/
 Route::prefix('admin')->middleware(['auth'])->as('admin.')->group(function () {
 
@@ -118,7 +111,6 @@ Route::prefix('admin')->middleware(['auth'])->as('admin.')->group(function () {
         Route::post('/baskets/{basket}/close', [PickBasketController::class, 'close'])
             ->middleware('permission:orders.update')->name('baskets.close');
 
-        // Transferencias
         Route::post('/baskets/{basket}/transfer', [PickBasketController::class, 'transferCreate'])
             ->middleware('permission:orders.update')->name('baskets.transfer.create');
         Route::post('/basket-transfers/{transfer}/accept', [PickBasketController::class, 'transferAccept'])
@@ -128,7 +120,6 @@ Route::prefix('admin')->middleware(['auth'])->as('admin.')->group(function () {
         Route::post('/basket-transfers/{transfer}/cancel', [PickBasketController::class, 'transferCancel'])
             ->middleware('permission:orders.update')->name('baskets.transfer.cancel');
 
-        // Autocomplete usuarios
         Route::get('/users/search', [PickBasketController::class, 'userLookup'])
             ->middleware('permission:orders.update')->name('users.search');
     });
@@ -161,7 +152,7 @@ Route::prefix('admin')->middleware(['auth'])->as('admin.')->group(function () {
     Route::post('/orders/{order}/items/{item}/unpick', [OrderController::class, 'unpickItem'])
         ->middleware('permission:orders.update')->name('orders.items.unpick');
 
-    // Recalcular estado de pago (botón)
+    // Recalcular estado de pago
     Route::post('/orders/{order}/recalc', [OrderController::class, 'recalc'])
         ->middleware('permission:payments.validate')->name('orders.recalc');
 
@@ -175,15 +166,30 @@ Route::prefix('admin')->middleware(['auth'])->as('admin.')->group(function () {
     Route::post('/orders/{order}/settlement/charge', [AdminOrderController::class, 'settlementCharge'])
         ->middleware('permission:payments.validate')->name('orders.settlement.charge');
 
-    /* --------- Pagos (admin sobre órdenes) --------- */
-    Route::post('/orders/{order}/payments', [OrderPaymentController::class, 'store'])
-        ->middleware('role:admin|vendedor')->name('orders.payments.store');
+    /* --------- Pagos (ADMIN sobre órdenes) --------- */
+    Route::middleware(['role:admin|vendedor'])->group(function () {
+        // Registrar pago interno
+        Route::post('/orders/{order}/payments', [OrderPaymentController::class, 'store'])
+            ->name('orders.payments.store');
 
-    Route::post('/payments/{payment}/status', [OrderPaymentController::class, 'updateStatus'])
-        ->middleware('role:admin|vendedor')->name('orders.payments.status');
+        // Cambiar estado de un pago
+        Route::post('/orders/payments/{payment}/status', [OrderPaymentController::class, 'updateStatus'])
+            ->name('orders.payments.status');
 
-    Route::delete('/payments/{payment}/evidence', [OrderPaymentController::class, 'deleteEvidence'])
-        ->middleware('role:admin|vendedor')->name('orders.payments.evidence.delete');
+        // Eliminar comprobante (solo borra evidence_url)
+        Route::delete('/orders/payments/{payment}/evidence', [OrderPaymentController::class, 'deleteEvidence'])
+            ->name('orders.payments.evidence.delete');
+    });
+
+    /* --------- Pagos SoftDeletes (solo admin) --------- */
+    Route::middleware(['role:admin'])->group(function () {
+        Route::delete('/orders/payments/{payment}', [OrderPaymentController::class, 'destroy'])
+            ->name('orders.payments.destroy');
+        Route::post('/orders/payments/{payment}/restore', [OrderPaymentController::class, 'restore'])
+            ->name('orders.payments.restore');
+        Route::delete('/orders/payments/{payment}/force', [OrderPaymentController::class, 'forceDelete'])
+            ->name('orders.payments.forceDelete');
+    });
 
     /* --------- Productos --------- */
     Route::middleware('permission:products.view')->group(function () {

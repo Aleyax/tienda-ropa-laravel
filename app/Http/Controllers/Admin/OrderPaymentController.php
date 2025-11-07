@@ -168,4 +168,93 @@ class OrderPaymentController extends Controller
         return back()->with('success', 'Comprobante eliminado.');
     }
 
+    // app/Http/Controllers/Admin/OrderPaymentController.php
+
+    public function destroy(Request $request, OrderPayment $payment)
+    {
+        abort_unless(\Auth::user()?->hasAnyRole(['admin', 'vendedor']) ?? false, 403);
+
+        $before = $payment->only(['status', 'amount', 'method', 'provider_ref', 'evidence_url']);
+        $orderId = (int) $payment->order_id;
+
+        DB::transaction(function () use ($payment, $before) {
+            $payment->delete();
+
+            PaymentLogger::log(
+                event: 'payment_soft_deleted',
+                payload: ['old' => $before, 'new' => ['deleted_at' => now()->toDateTimeString()]],
+                orderId: $payment->order_id,
+                orderPaymentId: $payment->id,
+                meta: ['reason' => 'admin_or_seller_soft_delete']
+            );
+
+            app(OrderPaymentRecalculator::class)->recalcSafe($payment->order_id);
+        });
+
+        return back()->with('success', "Pago #{$payment->id} eliminado (recuperable).");
+    }
+
+    public function restore(Request $request, int $id)
+    {
+        abort_unless(\Auth::user()?->hasAnyRole(['admin', 'vendedor']) ?? false, 403);
+
+        $payment = OrderPayment::withTrashed()->findOrFail($id);
+        DB::transaction(function () use ($payment) {
+            $payment->restore();
+
+            PaymentLogger::log(
+                event: 'payment_restored',
+                payload: ['old' => ['deleted_at' => now()->toDateTimeString()], 'new' => ['deleted_at' => null]],
+                orderId: $payment->order_id,
+                orderPaymentId: $payment->id,
+                meta: ['reason' => 'admin_or_seller_restore']
+            );
+
+            app(OrderPaymentRecalculator::class)->recalcSafe($payment->order_id);
+        });
+
+        return back()->with('success', "Pago #{$payment->id} restaurado.");
+    }
+
+    public function forceDelete(Request $request, int $id)
+    {
+        abort_unless(\Auth::user()?->hasAnyRole(['admin']) ?? false, 403); // definitivo solo admin
+
+        $payment = OrderPayment::withTrashed()->findOrFail($id);
+
+        \DB::transaction(function () use ($payment) {
+            $before = $payment->only(['status', 'amount', 'method', 'provider_ref', 'evidence_url']);
+            $orderId = (int) $payment->order_id;
+
+            // si quieres, también borra el archivo evidencia si existe y está en public
+            if ($payment->evidence_url) {
+                $publicBase = rtrim(\Storage::url(''), '/'); // ej: /storage
+                $baseHost = rtrim(config('app.url'), '/');   // ej: http://localhost
+                // Soportar URL absoluta o relativa
+                $url = $payment->evidence_url;
+                if (str_starts_with($url, $baseHost)) {
+                    $url = substr($url, strlen($baseHost));
+                }
+                if (str_starts_with($url, $publicBase)) {
+                    $relative = ltrim(substr($url, strlen($publicBase)), '/');
+                    \Storage::disk('public')->delete($relative);
+                }
+            }
+
+            $payment->forceDelete();
+
+            PaymentLogger::log(
+                event: 'payment_force_deleted',
+                payload: ['old' => $before, 'new' => null],
+                orderId: $orderId,
+                orderPaymentId: null,
+                meta: ['reason' => 'admin_force_delete']
+            );
+
+            app(OrderPaymentRecalculator::class)->recalcSafe($orderId);
+        });
+
+        return back()->with('success', "Pago eliminado definitivamente.");
+    }
+
 }
