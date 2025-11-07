@@ -103,51 +103,55 @@ class OrderController extends Controller
     // Detalle
     public function show(Request $request, Order $order)
     {
+        $tab = $request->query('tab', 'pagos'); // <<--- importante para tabs
 
-        $includeDeleted = (bool) request('include_deleted');
-        $showDeleted = request('show_deleted') === '1';
+        $includeDeleted = (bool) $request->query('include_deleted');
+        $showDeleted = $request->query('show_deleted') === '1';
 
-        $paymentsQuery = $order->payments()->with('collectedBy');
+        // === Pagos activos ===
+        $payments = OrderPayment::where('order_id', $order->id)
+            ->with('collectedBy')
+            ->latest()
+            ->get();
 
-        if ($showDeleted) {
-            $paymentsQuery->withTrashed();
-        }
+        // === Pagos eliminados (SoftDeletes) ===
+        $deletedPayments = OrderPayment::onlyTrashed()
+            ->where('order_id', $order->id)
+            ->with('collectedBy')
+            ->latest()
+            ->get();
 
-        $payments = $paymentsQuery->orderBy('id')->get();
-        // Eager loading
+        // === Cargar relaciones ===
         $order->load([
             'user',
-            'payments' => function ($q) use ($includeDeleted) {
-                if ($includeDeleted) {
-                    $q->withTrashed();
-                }
-                $q->orderByDesc('id');
-            },
-            'items' => fn($q) => $q->with(['order']),
+            'items.variant.product',
+            'items.variant.color',
+            'items.variant.size',
         ]);
 
-        // Canasta
+        // === Canasta ===
         $basket = \App\Models\PickBasket::where('order_id', $order->id)->latest()->first();
 
-        // Usuario actual
         $me = Auth::user();
+        $meId = (int) ($me?->id ?? 0);
 
-        // Users activos
         $activeUsers = \App\Models\User::query()
-            ->when(Schema::hasColumn('users', 'is_active'), fn($q) => $q->where('is_active', 1))
-            ->where('id', '!=', $me?->id)
+            ->when(\Schema::hasColumn('users', 'is_active'), fn($q) => $q->where('is_active', 1))
+            ->where('id', '!=', $meId)
             ->orderBy('name')
             ->get(['id', 'name', 'email']);
 
         $hasPendingTransfer = $basket ? $basket->transfers()->where('status', 'pending')->exists() : false;
 
         $canTransfer = $basket
-            && $basket->status === 'open'
-            && (int) $basket->responsible_user_id === (int) ($me?->id ?? 0)
+            && in_array($basket->status, ['open', 'in_progress'])
+            && (int) $basket->responsible_user_id === $meId
             && !$hasPendingTransfer;
 
-        $readOnly = !$basket || (int) $basket->responsible_user_id !== (int) ($me?->id ?? 0);
-        $meId = (int) ($me?->id ?? 0);
+        $readOnly = !$basket
+            || !in_array($basket->status, ['open', 'in_progress'])
+            || (int) $basket->responsible_user_id !== $meId
+            || $hasPendingTransfer;
 
         $jsUsers = $activeUsers->map(fn($u) => [
             'id' => $u->id,
@@ -155,7 +159,7 @@ class OrderController extends Controller
             'email' => $u->email,
         ]);
 
-        // === NUEVO: sincroniza estado global segun pagos y usa el resumen
+        // === Sincronizar estado de pago ===
         $sync = $order->syncPaymentStatus(save: true);
         $sumPaid = $sync['sum_paid'];
         $sumPending = $sync['sum_pending'];
@@ -163,11 +167,12 @@ class OrderController extends Controller
         $orderTotal = $sync['total'];
         $remaining = $sync['remaining'];
         $progressPct = $sync['progress_pct'];
-        // =============== LOGS DE PAGO (con filtros) ===============
-        $filterEvent = $request->query('log_event');       // ej: payment_created, payment_status_updated...
-        $filterActor = $request->query('log_actor');       // user_id (admin/vendedor)
-        $filterFrom = $request->query('log_from');        // YYYY-MM-DD
-        $filterTo = $request->query('log_to');          // YYYY-MM-DD
+
+        // === Historial de pagos (LOGS) ===
+        $filterEvent = $request->query('log_event');
+        $filterActor = $request->query('log_actor');
+        $filterFrom = $request->query('log_from');
+        $filterTo = $request->query('log_to');
 
         $logs = PaymentLog::query()
             ->with('actor')
@@ -177,7 +182,10 @@ class OrderController extends Controller
             ->between($filterFrom, $filterTo)
             ->latest('id')
             ->paginate(10)
-            ->appends($request->only(['log_event', 'log_actor', 'log_from', 'log_to']));
+            ->appends(array_merge(
+                $request->only(['log_event', 'log_actor', 'log_from', 'log_to']),
+                ['tab' => 'historial'] // <<--- mantener tab al paginar
+            ));
 
         return view('admin.orders.show', compact(
             'order',
@@ -198,11 +206,12 @@ class OrderController extends Controller
             'filterActor',
             'filterFrom',
             'filterTo',
-            'includeDeleted',
-            'showDeleted',
-            'payments'
+            'tab',
+            'payments',
+            'deletedPayments'
         ));
     }
+
 
 
 

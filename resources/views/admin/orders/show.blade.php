@@ -4,8 +4,10 @@
 
 @section('content')
 
-    @php
+    {{-- Necesario para ocultar x-cloak hasta que Alpine cargue --}}
+    <style>[x-cloak]{display:none!important}</style>
 
+    @php
         $payColors = [
             'paid' => 'bg-green-100 text-green-800',
             'partially_paid' => 'bg-amber-100 text-amber-800',
@@ -25,11 +27,12 @@
         ];
         $statusClass = $statusClasses[$order->status] ?? 'bg-gray-100 text-gray-800';
         $payClass = $payColors[$order->payment_status] ?? 'bg-gray-100 text-gray-800';
+
+        // Canasta & users (tu controller ya manda varias, pero mantenemos fallback por seguridad)
         $meId = (int) ($meId ?? (auth()->id() ?? 0));
         $basket = $basket ?? \App\Models\PickBasket::where('order_id', $order->id)->latest()->first();
 
-        $activeUsers =
-            $activeUsers ??
+        $activeUsers = $activeUsers ??
             \App\Models\User::query()
                 ->when(\Schema::hasColumn('users', 'is_active'), fn($q) => $q->where('is_active', 1))
                 ->where('id', '!=', $meId)
@@ -38,35 +41,40 @@
 
         $hasPendingTransfer = $basket ? $basket->transfers()->where('status', 'pending')->exists() : false;
 
-        // <<< CAMBIO CLAVE: estados editables
         $editableStatuses = ['open', 'in_progress'];
         $__diff = is_null($order->shipping_actual) ? null : round($order->shipping_amount - $order->shipping_actual, 2);
-        // Solo-lectura si: no hay canasta, o estado no editable, o no soy responsable, o hay transferencia pendiente
-        $readOnly =
-            !$basket ||
-            !in_array($basket->status, $editableStatuses, true) ||
-            (int) $basket->responsible_user_id !== $meId ||
-            $hasPendingTransfer;
 
-        // Puedo transferir si: hay canasta, estado editable, soy responsable y no hay transferencia pendiente
-        $canTransfer =
-            $basket &&
-            in_array($basket->status, $editableStatuses, true) &&
-            (int) $basket->responsible_user_id === $meId &&
-            !$hasPendingTransfer;
+        $readOnly = isset($readOnly)
+            ? (bool) $readOnly
+            : (
+                !$basket ||
+                !in_array($basket->status, $editableStatuses, true) ||
+                (int) $basket->responsible_user_id !== $meId ||
+                $hasPendingTransfer
+            );
+
+        $canTransfer = isset($canTransfer)
+            ? (bool) $canTransfer
+            : (
+                $basket &&
+                in_array($basket->status, $editableStatuses, true) &&
+                (int) $basket->responsible_user_id === $meId &&
+                !$hasPendingTransfer
+            );
 
         $jsUsers = (
-            $jsUsers ??
-            $activeUsers->map(
-                fn($u) => [
-                    'id' => $u->id,
-                    'name' => $u->name,
-                    'email' => $u->email,
-                ],
-            )
+            $jsUsers ?? $activeUsers->map(fn($u) => ['id'=>$u->id,'name'=>$u->name,'email'=>$u->email])
         )->values();
-    @endphp
 
+        // Fuente de filas para tabs:
+        // - Activos: siempre query fresca
+        // - Eliminados: onlyTrashed, para que funcione aunque el controller no lo pase
+        $activePayments = \App\Models\OrderPayment::where('order_id', $order->id)->latest()->get();
+        $deletedPayments = \App\Models\OrderPayment::onlyTrashed()->where('order_id', $order->id)->latest()->get();
+
+        // Tab por querystring (default: pagos)
+        $initialTab = request('tab', 'pagos');
+    @endphp
 
     <div class="grid md:grid-cols-3 gap-4">
         {{-- ====== Columna izquierda (2/3) ====== --}}
@@ -95,14 +103,15 @@
                             'cancelled' => 'red',
                             default => 'gray',
                         }" :text="ucfirst($order->status)" />
-
                     </div>
-
                     <div><span class="text-gray-500">Creado:</span> {{ $order->created_at->format('Y-m-d H:i') }}</div>
                 </div>
                 @if ($order->voucher_url)
                     <div class="p-3">
-                        <a class="text-blue-600 underline" href="{{ $order->voucher_url }}" target="_blank">Ver voucher</a>
+                        <button class="text-blue-600 underline"
+                                @click="$dispatch('open-view-evidence', { url: '{{ $order->voucher_url }}' })">
+                            Ver voucher
+                        </button>
                     </div>
                 @endif
             </div>
@@ -131,43 +140,41 @@
                         <button class="bg-blue-600 text-white px-3 py-1 rounded">Crear y asignarme canasta</button>
                     </form>
                 @else
-                    {{-- ==== Transferencia (con reglas UX) ==== --}}
+                    {{-- Transferencia con reglas UX --}}
                     <div class="flex flex-col gap-2">
                         <form id="transfer-form" method="POST"
-                            action="{{ route('admin.baskets.transfer.create', $basket) }}"
-                            class="flex flex-wrap gap-2 items-center">
+                              action="{{ route('admin.baskets.transfer.create', $basket) }}"
+                              class="flex flex-wrap gap-2 items-center">
                             @csrf
 
                             <div class="flex items-center gap-2">
                                 <label class="text-sm text-gray-700">Derivar a:</label>
                                 <input type="text" id="user_lookup" class="border p-1 w-64"
-                                    placeholder="ID o nombre/email del usuario" list="users_datalist" autocomplete="off"
-                                    @disabled(!$canTransfer)>
+                                       placeholder="ID o nombre/email del usuario" list="users_datalist" autocomplete="off"
+                                       @disabled(!$canTransfer)>
                                 <datalist id="users_datalist">
                                     @foreach ($activeUsers as $u)
-                                        <option value="{{ $u->id }} — {{ $u->name }} ({{ $u->email }})">
-                                        </option>
+                                        <option value="{{ $u->id }} — {{ $u->name }} ({{ $u->email }})"></option>
                                     @endforeach
                                 </datalist>
                             </div>
 
                             <input type="hidden" name="to_user_id" id="to_user_id" value="">
                             <input type="text" name="note" class="border p-1 w-64" placeholder="Nota (opcional)"
-                                @disabled(!$canTransfer)>
+                                   @disabled(!$canTransfer)>
                             <button id="btn-transfer" class="px-3 py-1 rounded border bg-white hover:bg-gray-50"
-                                @disabled(!$canTransfer)>
+                                    @disabled(!$canTransfer)>
                                 Transferir
                             </button>
                         </form>
 
-                        {{-- Cerrar canasta: solo si soy responsable y está open --}}
+                        {{-- Cerrar canasta --}}
                         @if (!$readOnly && in_array($basket->status, ['open', 'in_progress'], true))
                             <form method="POST" action="{{ route('admin.baskets.close', $basket) }}">
                                 @csrf
                                 <button class="px-3 py-1 rounded border bg-gray-800 text-white">Cerrar canasta</button>
                             </form>
                         @endif
-
 
                         @if (!$canTransfer)
                             <div class="text-xs text-gray-500">
@@ -185,7 +192,7 @@
                         @endif
                     </div>
 
-                    {{-- Ítems para pick/unpick con canasta --}}
+                    {{-- Ítems pick/unpick --}}
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white border mt-2">
                             <thead class="bg-gray-50">
@@ -202,51 +209,48 @@
                             <tbody>
                                 @foreach ($order->items as $it)
                                     @php
-                                        $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find(
-                                            $it->variant_id,
-                                        );
+                                        $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find($it->variant_id);
                                         $pending = max(0, (int) $it->qty - (int) $it->picked_qty);
                                     @endphp
                                     <tr>
                                         <td class="p-2 border">{{ $variant?->product?->name }}</td>
-                                        <td class="p-2 border">{{ $variant?->color?->name }} /
-                                            {{ $variant?->size?->code }}</td>
+                                        <td class="p-2 border">{{ $variant?->color?->name }} / {{ $variant?->size?->code }}</td>
                                         <td class="p-2 border text-center">{{ (int) $it->qty }}</td>
                                         <td class="p-2 border text-center">{{ (int) $it->picked_qty }}</td>
                                         <td class="p-2 border text-center">
                                             {{ (int) ($it->backorder_qty ?? 0) }}
                                             @if ((int) ($it->backorder_qty ?? 0) > 0)
-                                                <span
-                                                    class="ml-1 text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">Backorder</span>
+                                                <span class="ml-1 text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">Backorder</span>
                                             @endif
                                         </td>
 
                                         {{-- Pick --}}
                                         <td class="p-2 border">
                                             <form method="POST" action="{{ route('admin.baskets.pick', $basket) }}"
-                                                class="flex items-center gap-2">
+                                                  class="flex items-center gap-2">
                                                 @csrf
                                                 <input type="hidden" name="order_item_id" value="{{ $it->id }}">
                                                 <input type="number" name="qty" min="1"
-                                                    max="{{ $pending }}" value="{{ $pending > 0 ? 1 : 0 }}"
-                                                    class="border p-1 w-20" @disabled($pending <= 0 || $readOnly)>
+                                                       max="{{ $pending }}" value="{{ $pending > 0 ? 1 : 0 }}"
+                                                       class="border p-1 w-20" @disabled($pending <= 0 || $readOnly)>
                                                 <button class="px-2 py-1 rounded text-sm border"
-                                                    @disabled($pending <= 0 || $readOnly)>Pickear</button>
+                                                        @disabled($pending <= 0 || $readOnly)>Pickear</button>
                                             </form>
                                         </td>
 
                                         {{-- Unpick --}}
                                         <td class="p-2 border">
                                             <form method="POST" action="{{ route('admin.baskets.unpick', $basket) }}"
-                                                class="flex items-center gap-2">
+                                                  class="flex items-center gap-2">
                                                 @csrf
                                                 <input type="hidden" name="order_item_id" value="{{ $it->id }}">
                                                 <input type="number" name="qty" min="1"
-                                                    max="{{ (int) $it->picked_qty }}"
-                                                    value="{{ (int) $it->picked_qty > 0 ? 1 : 0 }}" class="border p-1 w-20"
-                                                    @disabled($it->picked_qty <= 0 || $readOnly)>
+                                                       max="{{ (int) $it->picked_qty }}"
+                                                       value="{{ (int) $it->picked_qty > 0 ? 1 : 0 }}"
+                                                       class="border p-1 w-20"
+                                                       @disabled($it->picked_qty <= 0 || $readOnly)>
                                                 <button class="px-2 py-1 rounded text-sm border"
-                                                    @disabled($it->picked_qty <= 0 || $readOnly)>Devolver</button>
+                                                        @disabled($it->picked_qty <= 0 || $readOnly)>Devolver</button>
                                             </form>
                                         </td>
                                     </tr>
@@ -257,7 +261,7 @@
                 @endif
             </div>
 
-            {{-- Ítems (resumen y acciones por ítem) --}}
+            {{-- Ítems (resumen) --}}
             <div class="border rounded">
                 <div class="p-3 font-semibold border-b">Ítems</div>
                 <table class="min-w-full bg-white">
@@ -276,9 +280,7 @@
                     <tbody>
                         @foreach ($order->items as $it)
                             @php
-                                $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find(
-                                    $it->variant_id,
-                                );
+                                $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find($it->variant_id);
                             @endphp
                             <tr>
                                 <td class="p-2 border">{{ $variant?->product?->name }}</td>
@@ -288,8 +290,7 @@
                                 <td class="p-2 border">S/ {{ number_format($it->amount, 2) }}</td>
                                 <td class="p-2 border">
                                     @if ((int) $it->backorder_qty > 0)
-                                        <span
-                                            class="px-2 py-1 text-yellow-800 bg-yellow-100 rounded">{{ (int) $it->backorder_qty }}</span>
+                                        <span class="px-2 py-1 text-yellow-800 bg-yellow-100 rounded">{{ (int) $it->backorder_qty }}</span>
                                     @else
                                         <span class="px-2 py-1 text-green-800 bg-green-100 rounded">OK</span>
                                     @endif
@@ -297,29 +298,27 @@
                                 <td class="p-2 border">{{ (int) ($variant->stock ?? 0) }}</td>
                                 <td class="p-2 border">
                                     @if ((int) $it->backorder_qty > 0)
-                                        <form method="POST"
-                                            action="{{ route('admin.orders.items.pick', [$order, $it]) }}"
-                                            class="flex items-center gap-2">
+                                        <form method="POST" action="{{ route('admin.orders.items.pick', [$order, $it]) }}"
+                                              class="flex items-center gap-2">
                                             @csrf
                                             <input type="number" name="qty" min="1"
-                                                max="{{ (int) $it->backorder_qty }}"
-                                                value="{{ (int) $it->backorder_qty }}" class="border p-1 w-20"
-                                                @disabled($readOnly)>
+                                                   max="{{ (int) $it->backorder_qty }}"
+                                                   value="{{ (int) $it->backorder_qty }}" class="border p-1 w-20"
+                                                   @disabled($readOnly)>
                                             <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm"
-                                                @disabled($readOnly)>Pick</button>
+                                                    @disabled($readOnly)>Pick</button>
                                         </form>
                                     @endif
 
                                     @if ((int) $it->qty - (int) $it->backorder_qty > 0)
-                                        <form method="POST"
-                                            action="{{ route('admin.orders.items.unpick', [$order, $it]) }}"
-                                            class="flex items-center gap-2 mt-2">
+                                        <form method="POST" action="{{ route('admin.orders.items.unpick', [$order, $it]) }}"
+                                              class="flex items-center gap-2 mt-2">
                                             @csrf
                                             <input type="number" name="qty" min="1"
-                                                max="{{ (int) $it->qty - (int) $it->backorder_qty }}" value="1"
-                                                class="border p-1 w-20" @disabled($readOnly)>
+                                                   max="{{ (int) $it->qty - (int) $it->backorder_qty }}" value="1"
+                                                   class="border p-1 w-20" @disabled($readOnly)>
                                             <button class="bg-gray-600 text-white px-2 py-1 rounded text-sm"
-                                                @disabled($readOnly)>Unpick</button>
+                                                    @disabled($readOnly)>Unpick</button>
                                         </form>
                                     @endif
                                 </td>
@@ -337,74 +336,76 @@
 
         {{-- ====== Columna derecha (1/3) ====== --}}
         <div class="space-y-4">
-            {{-- Pago --}}
+
+            {{-- Actualizar pago general --}}
             <div class="border rounded p-3">
                 <div class="font-semibold mb-2">Actualizar pago</div>
                 @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
                     <form method="POST" action="{{ route('admin.orders.paystatus', $order) }}" class="flex gap-2">
                         @csrf
                         <select name="payment_status" class="border p-2">
-                            @foreach (['unpaid', 'pending_confirmation', 'cod_promised', 'authorized', 'paid', 'failed', 'partially_paid'] as $ps)
-                                <option value="{{ $ps }}" @selected($ps === $order->payment_status)>{{ $ps }}
-                                </option>
+                            @foreach (['unpaid','pending_confirmation','cod_promised','authorized','paid','failed','partially_paid'] as $ps)
+                                <option value="{{ $ps }}" @selected($ps === $order->payment_status)>{{ $ps }}</option>
                             @endforeach
                         </select>
                         <button class="bg-gray-800 text-white px-3 rounded">Guardar</button>
                     </form>
                 @else
                     <div class="text-sm text-gray-600">
-                        Estado de pago: <x-badge :type="match ($order->payment_status) {
+                        Estado de pago:
+                        <x-badge :type="match ($order->payment_status) {
                             'paid' => 'green',
                             'pending_confirmation' => 'yellow',
                             'failed' => 'red',
                             'partially_paid' => 'amber',
                             default => 'gray',
                         }" :text="ucfirst(str_replace('_', ' ', $order->payment_status))" />
-
                     </div>
                 @endif
             </div>
 
-            {{-- === Resumen de pagos === --}}
+            {{-- Resumen de pagos (tu partial) --}}
             @include('admin.orders.partials.payment-summary')
 
-            @if (!$order->payments->count())
-                <div class="text-sm text-gray-600">Aún no se han registrado pagos en esta orden.</div>
-            @endif
-
-            {{-- Tabs pagos --}}
-            <div x-data="{ tab: '{{ request('tab', 'pagos') }}' }" class="border rounded">
+            {{-- ===== Tabs Pagos / Eliminados / Historial ===== --}}
+            <div x-data="{ tab: '{{ $initialTab }}' }" class="border rounded">
                 <div class="flex gap-2 border-b p-2">
-                    <button class="px-3 py-1 rounded"
-                        :class="tab === 'pagos' ? 'bg-gray-800 text-white' : 'bg-gray-100'" @click="tab='pagos'">Pagos
-                        registrados</button>
-                    <button class="px-3 py-1 rounded"
-                        :class="tab === 'eliminados' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
-                        @click="tab='eliminados'">Eliminados</button>
-                    <button class="px-3 py-1 rounded"
-                        :class="tab === 'historial' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
-                        @click="tab='historial'">Historial de pagos y cambios</button>
+                    <a href="{{ route('admin.orders.show', [$order, 'tab' => 'pagos']) }}"
+                       @click.prevent="tab='pagos'; history.replaceState({},'', '?tab=pagos')"
+                       :class="tab === 'pagos' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                       class="px-3 py-1 rounded">Pagos registrados</a>
+
+                    <a href="{{ route('admin.orders.show', [$order, 'tab' => 'eliminados']) }}"
+                       @click.prevent="tab='eliminados'; history.replaceState({},'', '?tab=eliminados')"
+                       :class="tab === 'eliminados' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                       class="px-3 py-1 rounded">Eliminados</a>
+
+                    <a href="{{ route('admin.orders.show', [$order, 'tab' => 'historial']) }}"
+                       @click.prevent="tab='historial'; history.replaceState({},'', '?tab=historial')"
+                       :class="tab === 'historial' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                       class="px-3 py-1 rounded">Historial de pagos y cambios</a>
+
                     <div class="ml-auto">
                         @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
                             <button @click="$dispatch('open-register-payment')"
-                                class="bg-blue-600 text-white px-3 py-1 rounded">+ Registrar pago</button>
+                                    class="bg-blue-600 text-white px-3 py-1 rounded">+ Registrar pago</button>
                         @endif
                     </div>
                 </div>
 
-                {{-- TAB: PAGOS --}}
+                {{-- TAB: PAGOS ACTIVOS --}}
                 <div x-show="tab==='pagos'" x-cloak class="p-3">
                     @include('admin.orders.partials.payments-table', [
-                        'rows' => $order->payments,
+                        'rows' => $activePayments,
                         'showActions' => true,
                         'mode' => 'active',
                     ])
                 </div>
 
-                {{-- TAB: ELIMINADOS (si usas SoftDeletes en OrderPayment) --}}
+                {{-- TAB: ELIMINADOS --}}
                 <div x-show="tab==='eliminados'" x-cloak class="p-3">
                     @include('admin.orders.partials.payments-table', [
-                        'rows' => $deletedPayments ?? collect(),
+                        'rows' => $deletedPayments,
                         'showActions' => true,
                         'mode' => 'deleted',
                     ])
@@ -422,156 +423,35 @@
                 </div>
             </div>
 
-
-
-
-            {{-- Estado pedido --}}
+            {{-- Actualizar estado del pedido --}}
             <div class="border rounded p-3">
                 <div class="font-semibold mb-2">Actualizar pedido</div>
                 <form method="POST" action="{{ route('admin.orders.status', $order) }}" class="flex gap-2">
                     @csrf
                     <select name="status" class="border p-2" @disabled($readOnly)>
-                        @foreach (['new', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'] as $s)
-                            <option value="{{ $s }}" @selected($s === $order->status)>{{ $s }}
-                            </option>
+                        @foreach (['new','confirmed','preparing','shipped','delivered','cancelled'] as $s)
+                            <option value="{{ $s }}" @selected($s === $order->status)>{{ $s }}</option>
                         @endforeach
                     </select>
                     <button class="bg-gray-800 text-white px-3 rounded" @disabled($readOnly)>Guardar</button>
                 </form>
             </div>
-            <div class="border rounded p-3 mt-4">
-                <div class="font-semibold mb-2">Historial de pagos y cambios</div>
 
-                {{-- Filtros --}}
-                <form method="GET" class="grid md:grid-cols-5 gap-2 mb-3">
-                    <input type="hidden" name="tab" value="logs">
-                    <input name="log_event" value="{{ $filterEvent }}" class="border p-2"
-                        placeholder="Evento (texto)">
-                    <input name="log_actor" value="{{ $filterActor }}" class="border p-2"
-                        placeholder="Actor (user_id)">
-                    <input type="date" name="log_from" value="{{ $filterFrom }}" class="border p-2">
-                    <input type="date" name="log_to" value="{{ $filterTo }}" class="border p-2">
-                    <button class="bg-gray-800 text-white px-3 rounded">Filtrar</button>
-                </form>
-
-                @if ($logs->count() === 0)
-                    <div class="text-sm text-gray-600">Sin registros aún.</div>
-                @else
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full bg-white border">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="p-2 border">#</th>
-                                    <th class="p-2 border">Fecha</th>
-                                    <th class="p-2 border">Evento</th>
-                                    <th class="p-2 border">Actor</th>
-                                    <th class="p-2 border">Pago</th>
-                                    <th class="p-2 border">Detalle</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($logs as $log)
-                                    <tr class="align-top">
-                                        <td class="p-2 border text-xs text-gray-500">{{ $log->id }}</td>
-                                        <td class="p-2 border text-xs text-gray-600">
-                                            {{ $log->created_at?->format('d/m/Y H:i') }}
-                                        </td>
-                                        <td class="p-2 border text-sm">
-                                            <span class="px-2 py-0.5 rounded bg-gray-100">{{ $log->event }}</span>
-                                        </td>
-                                        <td class="p-2 border text-sm">
-                                            @if ($log->user)
-                                                {{ $log->user->name }}
-                                                <span class="text-xs text-gray-500">({{ $log->user_id }})</span>
-                                            @else
-                                                <span class="text-xs text-gray-500">—</span>
-                                            @endif
-                                        </td>
-                                        <td class="p-2 border text-xs">
-                                            @if ($log->order_payment_id)
-                                                #{{ $log->order_payment_id }}
-                                            @else
-                                                —
-                                            @endif
-                                        </td>
-                                        <td class="p-2 border text-xs">
-                                            {{-- meta resumida --}}
-                                            @php $meta = $log->meta ?? []; @endphp
-                                            @if (!empty($meta))
-                                                <div class="text-gray-700">
-                                                    @if (isset($meta['reason']))
-                                                        <div><strong>Razón:</strong> {{ $meta['reason'] }}</div>
-                                                    @endif
-                                                    @if (isset($meta['note']) && $meta['note'])
-                                                        <div><strong>Nota:</strong> {{ $meta['note'] }}</div>
-                                                    @endif
-                                                    @if (isset($meta['ip']))
-                                                        <div class="text-gray-500">IP: {{ $meta['ip'] }}</div>
-                                                    @endif
-                                                    @if (isset($meta['route']))
-                                                        <div class="text-gray-500">Route: {{ $meta['route'] }}</div>
-                                                    @endif
-                                                </div>
-                                            @endif
-
-                                            {{-- Old / New payload expandibles --}}
-                                            <details class="mt-1">
-                                                <summary class="cursor-pointer text-blue-700">Payload</summary>
-                                                <div class="grid md:grid-cols-2 gap-2 mt-1">
-                                                    <div>
-                                                        <div class="text-gray-500 mb-1">Old</div>
-                                                        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-x-auto">@json($log->old_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)</pre>
-                                                    </div>
-                                                    <div>
-                                                        <div class="text-gray-500 mb-1">New</div>
-                                                        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-x-auto">@json($log->new_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)</pre>
-                                                    </div>
-                                                </div>
-                                            </details>
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="mt-2">
-                        {{ $logs->links() }}
-                    </div>
-                @endif
-
-                @if (auth()->user()
-                        ?->hasAnyRole(['admin', 'vendedor']))
-                    <form method="POST" action="{{ route('admin.orders.recalc', $order) }}" class="mt-2">
-                        @csrf
-                        <button class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
-                            🔄 Recalcular estado de pago
-                        </button>
-                    </form>
-                @endif
-
-            </div>
             {{-- Prioridad --}}
             @php
-                $canManagePriority = auth()
-                    ->user()
-                    ->hasAnyRole(['admin', 'vendedor']);
+                $canManagePriority = auth()->user()->hasAnyRole(['admin','vendedor']);
             @endphp
             <div class="border rounded p-3">
                 <div class="font-semibold mb-2">Prioridad de atención</div>
-
                 <div class="mb-2">
                     @if ($order->is_priority)
                         <span class="text-xs px-2 py-1 rounded bg-amber-200 text-amber-900 font-semibold">
                             Prioritario ({{ (int) $order->priority_level }})
                         </span>
                     @else
-                        <span class="text-xs px-2 py-1 rounded bg-gray-200 text-gray-700">
-                            Sin prioridad
-                        </span>
+                        <span class="text-xs px-2 py-1 rounded bg-gray-200 text-gray-700">Sin prioridad</span>
                     @endif
                 </div>
-
 
                 @if ($canManagePriority)
                     <form method="POST" action="{{ route('admin.orders.priority', $order) }}" class="space-y-2">
@@ -587,7 +467,7 @@
                         <div class="flex items-center gap-2">
                             <label class="text-sm">Nivel</label>
                             <input type="number" name="priority_level" min="0" max="99"
-                                class="border p-1 w-24" value="{{ (int) $order->priority_level }}">
+                                   class="border p-1 w-24" value="{{ (int) $order->priority_level }}">
                             <span class="text-xs text-gray-500">0 = sin prioridad</span>
                         </div>
 
@@ -616,28 +496,25 @@
                         </form>
                     </div>
                 @else
-                    <div class="text-sm text-gray-600">Prioridad:
-                        <strong>{{ $order->is_priority ? 'Sí' : 'No' }}</strong>
+                    <div class="text-sm text-gray-600">
+                        Prioridad: <strong>{{ $order->is_priority ? 'Sí' : 'No' }}</strong>
                         (nivel {{ (int) $order->priority_level }})
                     </div>
                 @endif
             </div>
 
-
             {{-- Liquidación de envío --}}
             <div class="border rounded p-3">
                 <div class="flex items-center justify-between mb-2">
                     <div class="font-semibold">Liquidación de envío</div>
-                    <div class="text-xs text-gray-600">Modo: <strong>{{ strtoupper($order->shipping_mode) }}</strong>
-                    </div>
+                    <div class="text-xs text-gray-600">Modo: <strong>{{ strtoupper($order->shipping_mode) }}</strong></div>
                 </div>
 
                 @if ($order->shipping_mode === 'pickup')
                     <div class="text-gray-700">Recojo en tienda — no aplica envío.</div>
                 @else
                     <div class="text-sm space-y-1 mb-3">
-                        <div>Depósito cobrado hoy: <strong>S/ {{ number_format($order->shipping_amount, 2) }}</strong>
-                        </div>
+                        <div>Depósito cobrado hoy: <strong>S/ {{ number_format($order->shipping_amount, 2) }}</strong></div>
                         <div>Estimado de zona:
                             <strong>
                                 @if (!is_null($order->shipping_estimated))
@@ -649,30 +526,26 @@
                         </div>
                         @if ($order->shippingAddress)
                             <div class="text-xs text-gray-500">
-                                Destino: {{ $order->shippingAddress->district }} — {{ $order->shippingAddress->line1 }}
-                                ({{ $order->shippingAddress->contact_name }})
+                                Destino: {{ $order->shippingAddress->district }} — {{ $order->shippingAddress->line1 }} ({{ $order->shippingAddress->contact_name }})
                             </div>
                         @endif
                         <div>Estado: <strong>{{ $order->shipping_settlement_status }}</strong></div>
                     </div>
 
                     <form method="POST" action="{{ route('admin.orders.shippingActual', $order) }}"
-                        class="flex items-end gap-2 mb-2">
+                          class="flex items-end gap-2 mb-2">
                         @csrf
                         <div class="flex-1">
                             <label class="block text-sm text-gray-600">Costo real courier</label>
                             <input type="number" step="0.01" min="0" name="shipping_actual"
-                                value="{{ old('shipping_actual', $order->shipping_actual) }}" class="border p-2 w-full"
-                                id="shipping_actual" @disabled($readOnly)>
+                                   value="{{ old('shipping_actual', $order->shipping_actual) }}"
+                                   class="border p-2 w-full" id="shipping_actual" @disabled($readOnly)>
                         </div>
-                        <button class="bg-gray-800 text-white px-3 py-2 rounded"
-                            @disabled($readOnly)>Guardar</button>
+                        <button class="bg-gray-800 text-white px-3 py-2 rounded" @disabled($readOnly)>Guardar</button>
                     </form>
 
                     @php
-                        $__diff = is_null($order->shipping_actual)
-                            ? null
-                            : round($order->shipping_amount - $order->shipping_actual, 2);
+                        $__diff = is_null($order->shipping_actual) ? null : round($order->shipping_amount - $order->shipping_actual, 2);
                     @endphp
 
                     <div class="text-sm mb-2">
@@ -702,14 +575,16 @@
                     <div class="flex gap-2">
                         <form method="POST" action="{{ route('admin.orders.settlement.refund', $order) }}">
                             @csrf
-                            <button class="px-3 py-2 bg-emerald-600 text-white rounded" @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) <= 0 || $readOnly)>
+                            <button class="px-3 py-2 bg-emerald-600 text-white rounded"
+                                    @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) <= 0 || $readOnly)>
                                 Registrar reembolso
                             </button>
                         </form>
 
                         <form method="POST" action="{{ route('admin.orders.settlement.charge', $order) }}">
                             @csrf
-                            <button class="px-3 py-2 bg-orange-600 text-white rounded" @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) >= 0 || $readOnly)>
+                            <button class="px-3 py-2 bg-orange-600 text-white rounded"
+                                    @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) >= 0 || $readOnly)>
                                 Cobro adicional
                             </button>
                         </form>
@@ -723,10 +598,6 @@
                 @endif
             </div>
 
-            {{-- ====== Historial de pagos/estados ====== --}}
-
-
-
             {{-- Flash feedback --}}
             @if (session('success'))
                 <div class="bg-green-100 text-green-800 p-2 rounded">{{ session('success') }}</div>
@@ -736,7 +607,8 @@
             @endif
         </div>
     </div>
-    {{-- Modal: Ver comprobante --}}
+
+    {{-- ========= Modal: Ver comprobante ========= --}}
     <div x-data="{ url: null }" @open-view-evidence.window="url=$event.detail.url; $refs.modalView.showModal()" x-cloak>
         <dialog x-ref="modalView" class="rounded-lg p-0 max-w-3xl w-[90vw]">
             <div class="flex justify-between items-center px-4 py-2 border-b">
@@ -756,7 +628,7 @@
 
     {{-- ===== JS: cálculo diff + transferencia con input predictivo ===== --}}
     <script>
-        (function() {
+        (function () {
             // --- Diff envío
             const input = document.getElementById('shipping_actual');
             if (input) {
@@ -776,7 +648,7 @@
                 });
             }
 
-            // --- Transferencia con predictivo (solo si existe el form)
+            // --- Transferencia con predictivo
             const meId = {{ (int) ($meId ?? 0) }};
             const users = {!! json_encode(
                 $jsUsers ?? [],
@@ -814,10 +686,9 @@
                     hiddenId.value = candidateId ?? '';
                     const invalid = !candidateId || candidateId === meId;
                     btn.disabled = invalid;
-                    btn.title = invalid ?
-                        (candidateId === meId ? 'No puedes derivarte la canasta a ti mismo.' :
-                            'Selecciona un usuario válido.') :
-                        '';
+                    btn.title = invalid
+                        ? (candidateId === meId ? 'No puedes derivarte la canasta a ti mismo.' : 'Selecciona un usuario válido.')
+                        : '';
                 }
 
                 lookup.addEventListener('input', validate);
@@ -826,9 +697,7 @@
                     const id = hiddenId.value ? parseInt(hiddenId.value, 10) : null;
                     if (!id) {
                         e.preventDefault();
-                        alert(
-                            'Selecciona un usuario válido (escribe ID o busca por nombre/email y elige de la lista).'
-                        );
+                        alert('Selecciona un usuario válido (escribe ID o busca por nombre/email y elige de la lista).');
                         return;
                     }
                     if (id === meId) {
