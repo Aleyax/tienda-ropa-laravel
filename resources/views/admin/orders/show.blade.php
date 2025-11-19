@@ -5,7 +5,11 @@
 @section('content')
 
     {{-- Necesario para ocultar x-cloak hasta que Alpine cargue --}}
-    <style>[x-cloak]{display:none!important}</style>
+    <style>
+        [x-cloak] {
+            display: none !important
+        }
+    </style>
 
     @php
         $payColors = [
@@ -32,7 +36,8 @@
         $meId = (int) ($meId ?? (auth()->id() ?? 0));
         $basket = $basket ?? \App\Models\PickBasket::where('order_id', $order->id)->latest()->first();
 
-        $activeUsers = $activeUsers ??
+        $activeUsers =
+            $activeUsers ??
             \App\Models\User::query()
                 ->when(\Schema::hasColumn('users', 'is_active'), fn($q) => $q->where('is_active', 1))
                 ->where('id', '!=', $meId)
@@ -46,24 +51,20 @@
 
         $readOnly = isset($readOnly)
             ? (bool) $readOnly
-            : (
-                !$basket ||
+            : !$basket ||
                 !in_array($basket->status, $editableStatuses, true) ||
                 (int) $basket->responsible_user_id !== $meId ||
-                $hasPendingTransfer
-            );
+                $hasPendingTransfer;
 
         $canTransfer = isset($canTransfer)
             ? (bool) $canTransfer
-            : (
-                $basket &&
+            : $basket &&
                 in_array($basket->status, $editableStatuses, true) &&
                 (int) $basket->responsible_user_id === $meId &&
-                !$hasPendingTransfer
-            );
+                !$hasPendingTransfer;
 
         $jsUsers = (
-            $jsUsers ?? $activeUsers->map(fn($u) => ['id'=>$u->id,'name'=>$u->name,'email'=>$u->email])
+            $jsUsers ?? $activeUsers->map(fn($u) => ['id' => $u->id, 'name' => $u->name, 'email' => $u->email])
         )->values();
 
         // Fuente de filas para tabs:
@@ -109,7 +110,7 @@
                 @if ($order->voucher_url)
                     <div class="p-3">
                         <button class="text-blue-600 underline"
-                                @click="$dispatch('open-view-evidence', { url: '{{ $order->voucher_url }}' })">
+                            @click="$dispatch('open-view-evidence', { url: '{{ $order->voucher_url }}' })">
                             Ver voucher
                         </button>
                     </div>
@@ -143,27 +144,28 @@
                     {{-- Transferencia con reglas UX --}}
                     <div class="flex flex-col gap-2">
                         <form id="transfer-form" method="POST"
-                              action="{{ route('admin.baskets.transfer.create', $basket) }}"
-                              class="flex flex-wrap gap-2 items-center">
+                            action="{{ route('admin.baskets.transfer.create', $basket) }}"
+                            class="flex flex-wrap gap-2 items-center">
                             @csrf
 
                             <div class="flex items-center gap-2">
                                 <label class="text-sm text-gray-700">Derivar a:</label>
                                 <input type="text" id="user_lookup" class="border p-1 w-64"
-                                       placeholder="ID o nombre/email del usuario" list="users_datalist" autocomplete="off"
-                                       @disabled(!$canTransfer)>
+                                    placeholder="ID o nombre/email del usuario" list="users_datalist" autocomplete="off"
+                                    @disabled(!$canTransfer)>
                                 <datalist id="users_datalist">
                                     @foreach ($activeUsers as $u)
-                                        <option value="{{ $u->id }} — {{ $u->name }} ({{ $u->email }})"></option>
+                                        <option value="{{ $u->id }} — {{ $u->name }} ({{ $u->email }})">
+                                        </option>
                                     @endforeach
                                 </datalist>
                             </div>
 
                             <input type="hidden" name="to_user_id" id="to_user_id" value="">
                             <input type="text" name="note" class="border p-1 w-64" placeholder="Nota (opcional)"
-                                   @disabled(!$canTransfer)>
+                                @disabled(!$canTransfer)>
                             <button id="btn-transfer" class="px-3 py-1 rounded border bg-white hover:bg-gray-50"
-                                    @disabled(!$canTransfer)>
+                                @disabled(!$canTransfer)>
                                 Transferir
                             </button>
                         </form>
@@ -209,48 +211,51 @@
                             <tbody>
                                 @foreach ($order->items as $it)
                                     @php
-                                        $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find($it->variant_id);
+                                        $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find(
+                                            $it->variant_id,
+                                        );
                                         $pending = max(0, (int) $it->qty - (int) $it->picked_qty);
                                     @endphp
                                     <tr>
                                         <td class="p-2 border">{{ $variant?->product?->name }}</td>
-                                        <td class="p-2 border">{{ $variant?->color?->name }} / {{ $variant?->size?->code }}</td>
+                                        <td class="p-2 border">{{ $variant?->color?->name }} /
+                                            {{ $variant?->size?->code }}</td>
                                         <td class="p-2 border text-center">{{ (int) $it->qty }}</td>
                                         <td class="p-2 border text-center">{{ (int) $it->picked_qty }}</td>
                                         <td class="p-2 border text-center">
                                             {{ (int) ($it->backorder_qty ?? 0) }}
                                             @if ((int) ($it->backorder_qty ?? 0) > 0)
-                                                <span class="ml-1 text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">Backorder</span>
+                                                <span
+                                                    class="ml-1 text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">Backorder</span>
                                             @endif
                                         </td>
 
                                         {{-- Pick --}}
                                         <td class="p-2 border">
                                             <form method="POST" action="{{ route('admin.baskets.pick', $basket) }}"
-                                                  class="flex items-center gap-2">
+                                                class="flex items-center gap-2">
                                                 @csrf
                                                 <input type="hidden" name="order_item_id" value="{{ $it->id }}">
                                                 <input type="number" name="qty" min="1"
-                                                       max="{{ $pending }}" value="{{ $pending > 0 ? 1 : 0 }}"
-                                                       class="border p-1 w-20" @disabled($pending <= 0 || $readOnly)>
+                                                    max="{{ $pending }}" value="{{ $pending > 0 ? 1 : 0 }}"
+                                                    class="border p-1 w-20" @disabled($pending <= 0 || $readOnly)>
                                                 <button class="px-2 py-1 rounded text-sm border"
-                                                        @disabled($pending <= 0 || $readOnly)>Pickear</button>
+                                                    @disabled($pending <= 0 || $readOnly)>Pickear</button>
                                             </form>
                                         </td>
 
                                         {{-- Unpick --}}
                                         <td class="p-2 border">
                                             <form method="POST" action="{{ route('admin.baskets.unpick', $basket) }}"
-                                                  class="flex items-center gap-2">
+                                                class="flex items-center gap-2">
                                                 @csrf
                                                 <input type="hidden" name="order_item_id" value="{{ $it->id }}">
                                                 <input type="number" name="qty" min="1"
-                                                       max="{{ (int) $it->picked_qty }}"
-                                                       value="{{ (int) $it->picked_qty > 0 ? 1 : 0 }}"
-                                                       class="border p-1 w-20"
-                                                       @disabled($it->picked_qty <= 0 || $readOnly)>
+                                                    max="{{ (int) $it->picked_qty }}"
+                                                    value="{{ (int) $it->picked_qty > 0 ? 1 : 0 }}" class="border p-1 w-20"
+                                                    @disabled($it->picked_qty <= 0 || $readOnly)>
                                                 <button class="px-2 py-1 rounded text-sm border"
-                                                        @disabled($it->picked_qty <= 0 || $readOnly)>Devolver</button>
+                                                    @disabled($it->picked_qty <= 0 || $readOnly)>Devolver</button>
                                             </form>
                                         </td>
                                     </tr>
@@ -280,7 +285,9 @@
                     <tbody>
                         @foreach ($order->items as $it)
                             @php
-                                $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find($it->variant_id);
+                                $variant = \App\Models\ProductVariant::with(['product', 'color', 'size'])->find(
+                                    $it->variant_id,
+                                );
                             @endphp
                             <tr>
                                 <td class="p-2 border">{{ $variant?->product?->name }}</td>
@@ -290,7 +297,8 @@
                                 <td class="p-2 border">S/ {{ number_format($it->amount, 2) }}</td>
                                 <td class="p-2 border">
                                     @if ((int) $it->backorder_qty > 0)
-                                        <span class="px-2 py-1 text-yellow-800 bg-yellow-100 rounded">{{ (int) $it->backorder_qty }}</span>
+                                        <span
+                                            class="px-2 py-1 text-yellow-800 bg-yellow-100 rounded">{{ (int) $it->backorder_qty }}</span>
                                     @else
                                         <span class="px-2 py-1 text-green-800 bg-green-100 rounded">OK</span>
                                     @endif
@@ -298,27 +306,29 @@
                                 <td class="p-2 border">{{ (int) ($variant->stock ?? 0) }}</td>
                                 <td class="p-2 border">
                                     @if ((int) $it->backorder_qty > 0)
-                                        <form method="POST" action="{{ route('admin.orders.items.pick', [$order, $it]) }}"
-                                              class="flex items-center gap-2">
+                                        <form method="POST"
+                                            action="{{ route('admin.orders.items.pick', [$order, $it]) }}"
+                                            class="flex items-center gap-2">
                                             @csrf
                                             <input type="number" name="qty" min="1"
-                                                   max="{{ (int) $it->backorder_qty }}"
-                                                   value="{{ (int) $it->backorder_qty }}" class="border p-1 w-20"
-                                                   @disabled($readOnly)>
+                                                max="{{ (int) $it->backorder_qty }}"
+                                                value="{{ (int) $it->backorder_qty }}" class="border p-1 w-20"
+                                                @disabled($readOnly)>
                                             <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm"
-                                                    @disabled($readOnly)>Pick</button>
+                                                @disabled($readOnly)>Pick</button>
                                         </form>
                                     @endif
 
                                     @if ((int) $it->qty - (int) $it->backorder_qty > 0)
-                                        <form method="POST" action="{{ route('admin.orders.items.unpick', [$order, $it]) }}"
-                                              class="flex items-center gap-2 mt-2">
+                                        <form method="POST"
+                                            action="{{ route('admin.orders.items.unpick', [$order, $it]) }}"
+                                            class="flex items-center gap-2 mt-2">
                                             @csrf
                                             <input type="number" name="qty" min="1"
-                                                   max="{{ (int) $it->qty - (int) $it->backorder_qty }}" value="1"
-                                                   class="border p-1 w-20" @disabled($readOnly)>
+                                                max="{{ (int) $it->qty - (int) $it->backorder_qty }}" value="1"
+                                                class="border p-1 w-20" @disabled($readOnly)>
                                             <button class="bg-gray-600 text-white px-2 py-1 rounded text-sm"
-                                                    @disabled($readOnly)>Unpick</button>
+                                                @disabled($readOnly)>Unpick</button>
                                         </form>
                                     @endif
                                 </td>
@@ -344,8 +354,9 @@
                     <form method="POST" action="{{ route('admin.orders.paystatus', $order) }}" class="flex gap-2">
                         @csrf
                         <select name="payment_status" class="border p-2">
-                            @foreach (['unpaid','pending_confirmation','cod_promised','authorized','paid','failed','partially_paid'] as $ps)
-                                <option value="{{ $ps }}" @selected($ps === $order->payment_status)>{{ $ps }}</option>
+                            @foreach (['unpaid', 'pending_confirmation', 'cod_promised', 'authorized', 'paid', 'failed', 'partially_paid'] as $ps)
+                                <option value="{{ $ps }}" @selected($ps === $order->payment_status)>{{ $ps }}
+                                </option>
                             @endforeach
                         </select>
                         <button class="bg-gray-800 text-white px-3 rounded">Guardar</button>
@@ -371,24 +382,24 @@
             <div x-data="{ tab: '{{ $initialTab }}' }" class="border rounded">
                 <div class="flex gap-2 border-b p-2">
                     <a href="{{ route('admin.orders.show', [$order, 'tab' => 'pagos']) }}"
-                       @click.prevent="tab='pagos'; history.replaceState({},'', '?tab=pagos')"
-                       :class="tab === 'pagos' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
-                       class="px-3 py-1 rounded">Pagos registrados</a>
+                        @click.prevent="tab='pagos'; history.replaceState({},'', '?tab=pagos')"
+                        :class="tab === 'pagos' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                        class="px-3 py-1 rounded">Pagos registrados</a>
 
                     <a href="{{ route('admin.orders.show', [$order, 'tab' => 'eliminados']) }}"
-                       @click.prevent="tab='eliminados'; history.replaceState({},'', '?tab=eliminados')"
-                       :class="tab === 'eliminados' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
-                       class="px-3 py-1 rounded">Eliminados</a>
+                        @click.prevent="tab='eliminados'; history.replaceState({},'', '?tab=eliminados')"
+                        :class="tab === 'eliminados' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                        class="px-3 py-1 rounded">Eliminados</a>
 
                     <a href="{{ route('admin.orders.show', [$order, 'tab' => 'historial']) }}"
-                       @click.prevent="tab='historial'; history.replaceState({},'', '?tab=historial')"
-                       :class="tab === 'historial' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
-                       class="px-3 py-1 rounded">Historial de pagos y cambios</a>
+                        @click.prevent="tab='historial'; history.replaceState({},'', '?tab=historial')"
+                        :class="tab === 'historial' ? 'bg-gray-800 text-white' : 'bg-gray-100'"
+                        class="px-3 py-1 rounded">Historial de pagos y cambios</a>
 
                     <div class="ml-auto">
                         @if (auth()->user()->hasAnyRole(['admin', 'vendedor']))
                             <button @click="$dispatch('open-register-payment')"
-                                    class="bg-blue-600 text-white px-3 py-1 rounded">+ Registrar pago</button>
+                                class="bg-blue-600 text-white px-3 py-1 rounded">+ Registrar pago</button>
                         @endif
                     </div>
                 </div>
@@ -429,8 +440,9 @@
                 <form method="POST" action="{{ route('admin.orders.status', $order) }}" class="flex gap-2">
                     @csrf
                     <select name="status" class="border p-2" @disabled($readOnly)>
-                        @foreach (['new','confirmed','preparing','shipped','delivered','cancelled'] as $s)
-                            <option value="{{ $s }}" @selected($s === $order->status)>{{ $s }}</option>
+                        @foreach (['new', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'] as $s)
+                            <option value="{{ $s }}" @selected($s === $order->status)>{{ $s }}
+                            </option>
                         @endforeach
                     </select>
                     <button class="bg-gray-800 text-white px-3 rounded" @disabled($readOnly)>Guardar</button>
@@ -439,7 +451,9 @@
 
             {{-- Prioridad --}}
             @php
-                $canManagePriority = auth()->user()->hasAnyRole(['admin','vendedor']);
+                $canManagePriority = auth()
+                    ->user()
+                    ->hasAnyRole(['admin', 'vendedor']);
             @endphp
             <div class="border rounded p-3">
                 <div class="font-semibold mb-2">Prioridad de atención</div>
@@ -467,7 +481,7 @@
                         <div class="flex items-center gap-2">
                             <label class="text-sm">Nivel</label>
                             <input type="number" name="priority_level" min="0" max="99"
-                                   class="border p-1 w-24" value="{{ (int) $order->priority_level }}">
+                                class="border p-1 w-24" value="{{ (int) $order->priority_level }}">
                             <span class="text-xs text-gray-500">0 = sin prioridad</span>
                         </div>
 
@@ -507,14 +521,16 @@
             <div class="border rounded p-3">
                 <div class="flex items-center justify-between mb-2">
                     <div class="font-semibold">Liquidación de envío</div>
-                    <div class="text-xs text-gray-600">Modo: <strong>{{ strtoupper($order->shipping_mode) }}</strong></div>
+                    <div class="text-xs text-gray-600">Modo: <strong>{{ strtoupper($order->shipping_mode) }}</strong>
+                    </div>
                 </div>
 
                 @if ($order->shipping_mode === 'pickup')
                     <div class="text-gray-700">Recojo en tienda — no aplica envío.</div>
                 @else
                     <div class="text-sm space-y-1 mb-3">
-                        <div>Depósito cobrado hoy: <strong>S/ {{ number_format($order->shipping_amount, 2) }}</strong></div>
+                        <div>Depósito cobrado hoy: <strong>S/ {{ number_format($order->shipping_amount, 2) }}</strong>
+                        </div>
                         <div>Estimado de zona:
                             <strong>
                                 @if (!is_null($order->shipping_estimated))
@@ -526,26 +542,30 @@
                         </div>
                         @if ($order->shippingAddress)
                             <div class="text-xs text-gray-500">
-                                Destino: {{ $order->shippingAddress->district }} — {{ $order->shippingAddress->line1 }} ({{ $order->shippingAddress->contact_name }})
+                                Destino: {{ $order->shippingAddress->district }} — {{ $order->shippingAddress->line1 }}
+                                ({{ $order->shippingAddress->contact_name }})
                             </div>
                         @endif
                         <div>Estado: <strong>{{ $order->shipping_settlement_status }}</strong></div>
                     </div>
 
                     <form method="POST" action="{{ route('admin.orders.shippingActual', $order) }}"
-                          class="flex items-end gap-2 mb-2">
+                        class="flex items-end gap-2 mb-2">
                         @csrf
                         <div class="flex-1">
                             <label class="block text-sm text-gray-600">Costo real courier</label>
                             <input type="number" step="0.01" min="0" name="shipping_actual"
-                                   value="{{ old('shipping_actual', $order->shipping_actual) }}"
-                                   class="border p-2 w-full" id="shipping_actual" @disabled($readOnly)>
+                                value="{{ old('shipping_actual', $order->shipping_actual) }}" class="border p-2 w-full"
+                                id="shipping_actual" @disabled($readOnly)>
                         </div>
-                        <button class="bg-gray-800 text-white px-3 py-2 rounded" @disabled($readOnly)>Guardar</button>
+                        <button class="bg-gray-800 text-white px-3 py-2 rounded"
+                            @disabled($readOnly)>Guardar</button>
                     </form>
 
                     @php
-                        $__diff = is_null($order->shipping_actual) ? null : round($order->shipping_amount - $order->shipping_actual, 2);
+                        $__diff = is_null($order->shipping_actual)
+                            ? null
+                            : round($order->shipping_amount - $order->shipping_actual, 2);
                     @endphp
 
                     <div class="text-sm mb-2">
@@ -575,16 +595,14 @@
                     <div class="flex gap-2">
                         <form method="POST" action="{{ route('admin.orders.settlement.refund', $order) }}">
                             @csrf
-                            <button class="px-3 py-2 bg-emerald-600 text-white rounded"
-                                    @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) <= 0 || $readOnly)>
+                            <button class="px-3 py-2 bg-emerald-600 text-white rounded" @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) <= 0 || $readOnly)>
                                 Registrar reembolso
                             </button>
                         </form>
 
                         <form method="POST" action="{{ route('admin.orders.settlement.charge', $order) }}">
                             @csrf
-                            <button class="px-3 py-2 bg-orange-600 text-white rounded"
-                                    @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) >= 0 || $readOnly)>
+                            <button class="px-3 py-2 bg-orange-600 text-white rounded" @disabled(is_null($order->shipping_actual) || ($__diff ?? 0) >= 0 || $readOnly)>
                                 Cobro adicional
                             </button>
                         </form>
@@ -625,10 +643,137 @@
             </div>
         </dialog>
     </div>
+    {{-- Modal: Registrar pago --}}
+    <div x-data="registerPaymentModal()" @open-register-payment.window="open()" x-cloak>
+        <dialog x-ref="modal" class="rounded-lg p-0 max-w-lg w-[92vw]">
+            <div class="flex items-center justify-between px-4 py-2 border-b">
+                <h3 class="font-semibold">Registrar pago</h3>
+                <button type="button" class="text-sm" @click="close()">✕</button>
+            </div>
+
+            <form method="POST" action="{{ route('admin.orders.payments.store', $order) }}"
+                enctype="multipart/form-data" @submit="onSubmit" class="p-4 space-y-3">
+                @csrf
+
+                {{-- Método --}}
+                <div>
+                    <label class="block text-sm mb-1">Método</label>
+                    <input type="text" name="method" x-model="form.method" class="border p-2 w-full rounded"
+                        placeholder="Transferencia / Yape / Plin" required>
+                    @error('method')
+                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                {{-- Monto --}}
+                <div>
+                    <label class="block text-sm mb-1">Monto (S/)</label>
+                    <input type="number" step="0.01" min="0" name="amount" x-model="form.amount"
+                        class="border p-2 w-full rounded" required>
+                    @error('amount')
+                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                {{-- Referencia bancaria / nota --}}
+                <div>
+                    <label class="block text-sm mb-1">Referencia bancaria (opcional)</label>
+                    <input type="text" name="provider_ref" x-model="form.provider_ref"
+                        class="border p-2 w-full rounded" placeholder="N° operación, voucher, etc.">
+                    @error('provider_ref')
+                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                {{-- Comprobante --}}
+                <div>
+                    <label class="block text-sm mb-1">Comprobante (imagen o PDF)</label>
+                    <input type="file" name="evidence" class="border p-2 w-full rounded"
+                        accept=".jpg,.jpeg,.png,.pdf" @change="previewEvidence($event)">
+                    @error('evidence')
+                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                    @enderror
+
+                    {{-- Preview rápido (si es imagen) --}}
+                    <template x-if="previewUrl && !isPdf">
+                        <img :src="previewUrl" class="mt-2 max-h-48 mx-auto rounded border">
+                    </template>
+                    <template x-if="previewUrl && isPdf">
+                        <div class="mt-2 text-xs text-gray-600">Archivo PDF seleccionado</div>
+                    </template>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t">
+                    <button type="button" class="px-3 py-1 rounded border" @click="close()"
+                        :disabled="submitting">Cancelar</button>
+                    <button type="submit" class="px-3 py-1 rounded bg-blue-600 text-white disabled:opacity-50"
+                        :disabled="submitting">
+                        <span x-show="!submitting">Guardar</span>
+                        <span x-show="submitting">Guardando…</span>
+                    </button>
+                </div>
+            </form>
+        </dialog>
+    </div>
+
+    <script>
+        function registerPaymentModal() {
+            return {
+                submitting: false,
+                previewUrl: null,
+                isPdf: false,
+                form: {
+                    method: '',
+                    amount: '',
+                    provider_ref: '',
+                },
+                open() {
+                    this.reset();
+                    this.$refs.modal.showModal();
+                },
+                close() {
+                    this.$refs.modal.close();
+                },
+                reset() {
+                    this.submitting = false;
+                    this.previewUrl = null;
+                    this.isPdf = false;
+                    this.form = {
+                        method: '',
+                        amount: '',
+                        provider_ref: ''
+                    };
+                },
+                onSubmit() {
+                    if (this.submitting) return;
+                    this.submitting = true;
+                },
+                previewEvidence(e) {
+                    const file = e.target.files?.[0];
+                    if (!file) {
+                        this.previewUrl = null;
+                        this.isPdf = false;
+                        return;
+                    }
+                    this.isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+                    if (this.isPdf) {
+                        this.previewUrl = URL.createObjectURL(file);
+                        return;
+                    }
+                    if (file.type.startsWith('image/')) {
+                        this.previewUrl = URL.createObjectURL(file);
+                    } else {
+                        this.previewUrl = null;
+                    }
+                }
+            }
+        }
+    </script>
+
 
     {{-- ===== JS: cálculo diff + transferencia con input predictivo ===== --}}
     <script>
-        (function () {
+        (function() {
             // --- Diff envío
             const input = document.getElementById('shipping_actual');
             if (input) {
@@ -686,9 +831,10 @@
                     hiddenId.value = candidateId ?? '';
                     const invalid = !candidateId || candidateId === meId;
                     btn.disabled = invalid;
-                    btn.title = invalid
-                        ? (candidateId === meId ? 'No puedes derivarte la canasta a ti mismo.' : 'Selecciona un usuario válido.')
-                        : '';
+                    btn.title = invalid ?
+                        (candidateId === meId ? 'No puedes derivarte la canasta a ti mismo.' :
+                            'Selecciona un usuario válido.') :
+                        '';
                 }
 
                 lookup.addEventListener('input', validate);
@@ -697,7 +843,8 @@
                     const id = hiddenId.value ? parseInt(hiddenId.value, 10) : null;
                     if (!id) {
                         e.preventDefault();
-                        alert('Selecciona un usuario válido (escribe ID o busca por nombre/email y elige de la lista).');
+                        alert(
+                            'Selecciona un usuario válido (escribe ID o busca por nombre/email y elige de la lista).');
                         return;
                     }
                     if (id === meId) {
